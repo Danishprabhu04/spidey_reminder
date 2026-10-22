@@ -13,8 +13,10 @@ from hanging_reminder.config import AppConfig
 class TestAppConfig:
     """Application configuration tests."""
 
-    def test_load_defaults(self):
+    def test_load_defaults(self, tmp_path, monkeypatch):
         """Load configuration with defaults (no file on disk)."""
+        import hanging_reminder.config as config_module
+        monkeypatch.setattr(config_module, "_config_dir", lambda: tmp_path)
         config = AppConfig.load()
         assert config.spring_stiffness == 150.0
         assert config.damping == 0.2

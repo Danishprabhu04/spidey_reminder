@@ -45,6 +45,7 @@ _VALIDATION_RULES: Dict[str, Any] = {
     "speech_bubble_duration": lambda v: v > 0,
     "power_reminder_timeout": lambda v: v > 0,
     "reminder_interval": lambda v: v > 0,
+    "anchor_offset_right": lambda v: isinstance(v, (int, float)) and v >= 0,
 }
 
 
@@ -91,6 +92,10 @@ class AppConfig:
     anchor_corner : str
         Which top corner the web attaches to.  One of:
         "top-left", "top-center", "top-right".
+    anchor_offset_right : int
+        Distance (px) from the right screen edge to the web's fixed anchor
+        on the top bar – under Spidey's tray icon.  Updated when the user
+        drops Spidey at the top bar.
     speech_bubble_duration : int
         How long (ms) a speech bubble remains visible after a click.
     power_reminder_timeout : int
@@ -119,6 +124,7 @@ class AppConfig:
 
     # Visual / UI
     anchor_corner: str = "top-left"
+    anchor_offset_right: int = 160  # Ubuntu puts tray icons near the right end
     speech_bubble_duration: int = 5000
     power_reminder_timeout: int = 15000
 
@@ -151,6 +157,7 @@ class AppConfig:
                     "character_size": 80,
                     "speech_bubble_duration": 5000,
                     "power_reminder_timeout": 15000,
+                    "anchor_offset_right": 160,
                 }
                 setattr(self, field_name, defaults.get(field_name, 0))
                 changed = True

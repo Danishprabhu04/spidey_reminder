@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import pytest
 
-from hanging_reminder.physics import SimulationEngine, Spring, Pendulum
+from hanging_reminder.physics import SimulationEngine, Spring, Pendulum, ElasticRope
 
 
 # ---------------------------------------------------------------------------
@@ -134,3 +134,88 @@ class TestSimulationEngine:
         sim = SimulationEngine(dt=1.0 / 120)
         result = sim.get_interpolant(0.5)
         assert 0.0 <= result <= 1.0
+
+# ---------------------------------------------------------------------------
+# Elastic rope tests
+# ---------------------------------------------------------------------------
+
+def _run(rope, seconds, dt=1 / 120):
+    for _ in range(int(seconds / dt)):
+        rope.integrate(dt)
+
+
+class TestElasticRope:
+    """2-D elastic web the character hangs from."""
+
+    def test_settles_below_anchor(self):
+        """From rest the feet hang straight below the anchor."""
+        rope = ElasticRope(anchor_x=500, anchor_y=0, rest_length=180)
+        rope.vx = 300.0
+        _run(rope, 20)
+        assert rope.x == pytest.approx(500, abs=2)
+        assert rope.y > 180  # rest length plus gravity sag
+        assert abs(rope.vx) < 1 and abs(rope.vy) < 1
+
+    def test_stretch_bounces_back(self):
+        """A stretched web recoils past the rest point before settling."""
+        rope = ElasticRope(anchor_x=0, anchor_y=0, rest_length=180)
+        _run(rope, 20)
+        rest_y = rope.y
+        rope.y += 300
+        min_y = rope.y
+        for _ in range(240):
+            rope.integrate(1 / 120)
+            min_y = min(min_y, rope.y)
+        assert min_y < rest_y - 20  # overshoot = bounce
+        _run(rope, 20)
+        assert rope.y == pytest.approx(rest_y, abs=2)
+
+    def test_tilt_is_unclamped(self):
+        """A hard sideways fling swings well past the old 0.7 rad limit."""
+        rope = ElasticRope(anchor_x=0, anchor_y=0, rest_length=180)
+        _run(rope, 5)
+        rope.vx = 2500.0
+        max_tilt = 0.0
+        for _ in range(240):
+            rope.integrate(1 / 120)
+            max_tilt = max(max_tilt, abs(rope.tilt))
+        assert max_tilt > 0.7
+        _run(rope, 30)
+        assert abs(math.atan2(math.sin(rope.tilt), math.cos(rope.tilt))) < 0.05
+
+    def test_extreme_velocity_stays_finite(self):
+        rope = ElasticRope(anchor_x=0, anchor_y=0, rest_length=180)
+        rope.vx, rope.vy = 1e7, -1e7
+        _run(rope, 2)
+        for value in (rope.x, rope.y, rope.vx, rope.vy, rope.tilt, rope.z):
+            assert math.isfinite(value)
+
+    def test_grab_follows_target_and_release_keeps_momentum(self):
+        rope = ElasticRope(anchor_x=0, anchor_y=0, rest_length=180)
+        for _ in range(120):
+            rope.grab(400, 300)
+            rope.integrate(1 / 120)
+        assert rope.x == pytest.approx(400, abs=15)
+        assert rope.y == pytest.approx(300, abs=15)
+        rope.vx = 800.0
+        rope.release()
+        assert not rope.is_grabbed
+        assert rope.tilt_vel != 0.0 and rope.vz > 0.0
+
+    def test_shoot_web_reels_back_to_rest(self):
+        rope = ElasticRope(anchor_x=0, anchor_y=0, rest_length=180)
+        rope.x, rope.y = 600, 700
+        rope.shoot_web(600, 0)
+        assert rope.current_length > 600
+        _run(rope, 20)
+        assert rope.ax == pytest.approx(600)
+        assert rope.x == pytest.approx(600, abs=2)
+        assert rope.stretch_ratio() < 1.2
+
+    def test_bounds_keep_body_inside(self):
+        rope = ElasticRope(anchor_x=100, anchor_y=0, rest_length=180)
+        rope.bounds = (0, 0, 200, 400)
+        rope.vx = -3000.0
+        for _ in range(240):
+            rope.integrate(1 / 120)
+            assert 0 <= rope.x <= 200 and 0 <= rope.y <= 400

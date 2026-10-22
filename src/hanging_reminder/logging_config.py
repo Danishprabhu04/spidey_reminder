@@ -129,7 +129,6 @@ class RotatingFileHandler(Handler):
                 entry["context"] = _context_to_str(record.context)
 
             line = json.dumps(entry, ensure_ascii=False)
-            self._path.write_line = True  # flag for append mode below
             with open(self._path, "a", encoding="utf-8") as f:
                 f.write(line + "\n")
         except Exception:

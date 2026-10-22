@@ -12,5 +12,8 @@ dependencies = [
     "dbus-python>=1.3.0",
 ]
 
+[project.scripts]
+hanging-reminder = "hanging_reminder.app:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]

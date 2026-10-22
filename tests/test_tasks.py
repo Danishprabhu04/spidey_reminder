@@ -57,6 +57,17 @@ class TestTaskRepository:
         assert len(pending) == 1
         assert pending[0].completed is False
 
+    def test_get_completed(self, isolated_db):
+        """Completed tasks are listed separately from pending ones."""
+        done = Task(title="Done task")
+        isolated_db.save(Task(title="Open task"))
+        isolated_db.toggle_complete(isolated_db.save(done))
+
+        completed = isolated_db.get_completed()
+        assert [t.title for t in completed] == ["Done task"]
+        assert completed[0].completed is True
+        assert completed[0].completed_at is not None
+
     def test_clear_completed(self, isolated_db):
         """Clear all completed tasks."""
         t1 = Task(title="Completed task")

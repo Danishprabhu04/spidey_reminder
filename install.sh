@@ -5,6 +5,13 @@ set -e
 echo "=== Spider-Man Hanging Reminder Installation ==="
 
 # -------------------------------------------------------
+# 0. System libraries – Qt's XWayland (xcb) backend needs libxcb-cursor0
+#    so Spidey can stay on top and be dragged freely on GNOME Wayland
+# -------------------------------------------------------
+echo "Installing system libraries (sudo)..."
+sudo apt-get install -y libxcb-cursor0
+
+# -------------------------------------------------------
 # 1. Install Python dependencies
 # -------------------------------------------------------
 echo "Installing Python dependencies..."
@@ -24,21 +31,29 @@ echo "Installing package..."
 python3 -m pip install --break-system-packages -e .
 
 # -------------------------------------------------------
-# 4. Create the desktop autostart entry
+# 4. Create the desktop autostart entry (starts Spidey at every login)
 # -------------------------------------------------------
 echo "Creating autostart entry..."
+# Absolute path – at login ~/.local/bin is not always on PATH yet
+APP_BIN="$(command -v hanging-reminder || echo "$HOME/.local/bin/hanging-reminder")"
+ICON="$HOME/.local/share/spidey-sense/spidey_icon.png"
+mkdir -p ~/.config/autostart
 DESKTOP_FILE=~/.config/autostart/spidey-reminder.desktop
-cat > "$DESKTOP_FILE" << 'DESKTOP'
+cat > "$DESKTOP_FILE" << DESKTOP
 [Desktop Entry]
 Type=Application
-Exec=hanging-reminder
+Exec=$APP_BIN
+Icon=$ICON
 Hidden=false
 NoDisplay=false
+Terminal=false
 X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=3
 Name=Spider-Man Hanging Reminder
 Comment=A friendly desktop companion helping you remember tasks
-DESKPOL
-chmod +x "$DESKTOP_FILE"
+Categories=Utility;
+DESKTOP
+chmod 644 "$DESKTOP_FILE"
 
 # -------------------------------------------------------
 # 5. Verify installation

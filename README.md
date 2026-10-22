@@ -10,11 +10,11 @@ Spider-Man hangs from a transparent web attached to your screen's top edge. He s
 
 ### Animation & Physics
 - **Idle hanging**: Subtle sway and breathing-like motion keeps the character alive without distraction
-- **Hover interaction**: Small head tilt when the pointer approaches
-- **Mouse press & grab**: Drag Spider-Man around the desktop with offset preservation
-- **Elastic release & swinging**: Natural pendulum dynamics with spring forces, damping, and gravity
-- **Smooth settling**: Gradual transition from swinging back to idle pose
-- **Double-click handling**: Correctly prevents duplicate interactions
+- **Elastic drag**: Grab Spider-Man anywhere on screen – his web stretches like a bungee
+- **Free swinging**: On release he flings, bounces and swings with no angle limit (he can even flip), with a front/back depth wobble
+- **Fixed web anchor**: His web hangs from one spot on the top bar, under his tray icon – after a throw he springs back up to it. Drop him right under the tray icon to move the pin (remembered across restarts)
+- **Tap for missions**: A single tap pops a speech bubble listing your pending tasks, with a link to the full mission list
+- **Click-through**: Only Spidey and his web catch the mouse – the rest of the screen works as usual
 
 ### Task Management
 - **Create tasks**: Type a task and press Enter

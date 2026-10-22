@@ -155,6 +155,35 @@ class TaskRepository:
             ))
         return tasks
 
+    # ---- get completed ----
+
+    def get_completed(self) -> List[Task]:
+        """Return all completed tasks, most recently completed first."""
+        conn = self._conn_open()
+        rows = conn.execute(
+            """
+            SELECT id, title, description, priority, deadline, created_at, completed_at
+            FROM tasks
+            WHERE completed = 1
+            ORDER BY completed_at DESC
+            """
+        ).fetchall()
+
+        tasks: List[Task] = []
+        for row in rows:
+            created = datetime.fromisoformat(row[5]) if row[5] else datetime.now()
+            tasks.append(Task(
+                id=row[0],
+                title=row[1],
+                description=row[2] or "",
+                priority=row[3] or "normal",
+                deadline=datetime.fromisoformat(row[4]) if row[4] else None,
+                completed=True,
+                created_at=created,
+                completed_at=datetime.fromisoformat(row[6]) if row[6] else None,
+            ))
+        return tasks
+
     # ---- toggle complete ----
 
     def toggle_complete(self, task_id: int) -> None:

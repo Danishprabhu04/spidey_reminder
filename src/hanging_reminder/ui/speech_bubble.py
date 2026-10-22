@@ -4,6 +4,8 @@ Features:
 - Rounded rectangle with a pointer directed at the character.
 - Subtle opacity/scale entrance and exit animations (QPropertyAnimation).
 - Text adapts to the current task state (no tasks, some tasks, many tasks).
+- Task-list mode (``show_tasks``): pending missions with priority dots and
+  an "Open mission list" link.
 - Does not steal focus or block desktop interaction.
 - Always-on-top relative to the companion window, but with Qt.WindowType.Tool
   so it stays out of the taskbar.
@@ -19,9 +21,11 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     QSequentialAnimationGroup,
     QEasingCurve,
+    QTimer,
     Property,
+    Signal,
 )
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget, QApplication
 
 
@@ -34,10 +38,27 @@ STRIPE_HEIGHT = 5
 BG_COLOR = QColor(30, 34, 44, 245)
 ACCENT_COLOR = QColor(210, 40, 40)
 TEXT_COLOR = QColor(235, 235, 235)
+LINK_COLOR = QColor(255, 120, 120)
+MUTED_TEXT_COLOR = QColor(170, 175, 185)
+
+# Task-list mode
+TASKS_WIDTH = 270
+TASKS_MAX_ROWS = 5
+TITLE_HEIGHT = 24
+ROW_HEIGHT = 21
+FOOTER_HEIGHT = 26
+PRIORITY_COLORS = {
+    "high": QColor(230, 130, 30),
+    "normal": QColor(220, 50, 50),
+    "low": QColor(30, 180, 80),
+}
 
 
 class SpeechBubble(QWidget):
     """Frameless transparent speech bubble with pointer aimed at the character."""
+
+    open_panel_requested = Signal()
+    dismissed = Signal()  # the user clicked the bubble
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -74,12 +95,19 @@ class SpeechBubble(QWidget):
 
         # Message state
         self._message: str = ""
+        self._tasks: list | None = None  # (title, priority) rows in task-list mode
+        self._tasks_title: str | None = None
         self._animating_in: bool = False
         self._animating_out: bool = False
         self._exit_connected: bool = False
 
         # Position tracking – updated by the companion window
         self._anchor_pos: QPoint = QPoint(0, 0)
+
+        # Auto-hide – restarted on every show so older taps can't hide early
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self.hide_message)
 
     # -------------------------------------------------------------------------
     # Qt properties – animated by QPropertyAnimation
@@ -109,13 +137,25 @@ class SpeechBubble(QWidget):
 
     def show_message(self, message: str | None = None) -> None:
         """Display a message in the bubble with an entrance animation."""
-        self._animating_out = False
+        self._tasks = None
+        self._hide_timer.stop()
 
         if message is not None:
             self._message = message
         elif self._message == "":
             self._message = "Hey! Any unfinished missions?"
 
+        self._animate_in()
+
+    def show_tasks(self, tasks: list, duration_ms: int = 10000, title: str | None = None) -> None:
+        """Show pending tasks as a list with an "Open mission list" link."""
+        self._tasks = [(t.title, t.priority or "normal") for t in tasks]
+        self._tasks_title = title
+        self._animate_in()
+        self._hide_timer.start(duration_ms)
+
+    def _animate_in(self) -> None:
+        self._animating_out = False
         self._animating_in = True
         self._fade_anim.stop()
         self._scale_anim.stop()
@@ -126,6 +166,7 @@ class SpeechBubble(QWidget):
         self._anim_group.start()
 
         self._reposition()
+        self.update()
         self.show()
         self.raise_()
 
@@ -151,8 +192,11 @@ class SpeechBubble(QWidget):
 
     def update_anchor(self, char_screen_pos: QPoint) -> None:
         """Set the character screen position for pointer direction."""
+        if char_screen_pos == self._anchor_pos:
+            return
         self._anchor_pos = char_screen_pos
-        self._reposition()
+        if self.isVisible():
+            self._reposition()
 
     # -------------------------------------------------------------------------
     # Geometry helpers
@@ -175,8 +219,7 @@ class SpeechBubble(QWidget):
 
         cx, cy = self._anchor_pos.x(), self._anchor_pos.y()
 
-        bubble_w = min(MAX_WIDTH, max(MIN_WIDTH, len(self._message) * 7 + 48))
-        bubble_h = 58 + BUBBLE_PADDING * 2
+        bubble_w, bubble_h = self._bubble_size()
 
         screen = QApplication.screenAt(QPoint(cx, cy))
         if screen is None:
@@ -199,6 +242,36 @@ class SpeechBubble(QWidget):
             by = geom.bottom() - bubble_h - 8
 
         self.setGeometry(int(bx), int(by), int(bubble_w), int(bubble_h))
+
+    def _bubble_size(self) -> tuple[int, int]:
+        if self._tasks is None:
+            return min(MAX_WIDTH, max(MIN_WIDTH, len(self._message) * 7 + 48)), 58 + BUBBLE_PADDING * 2
+        rows = max(1, min(len(self._tasks), TASKS_MAX_ROWS))
+        if len(self._tasks) > TASKS_MAX_ROWS:
+            rows += 1  # "+N more"
+        height = BUBBLE_PADDING * 2 + STRIPE_HEIGHT + TITLE_HEIGHT + rows * ROW_HEIGHT
+        if self._tasks:
+            height += FOOTER_HEIGHT
+        return TASKS_WIDTH, height
+
+    def _footer_rect(self) -> QRectF:
+        return QRectF(
+            BUBBLE_PADDING,
+            self.height() - BUBBLE_PADDING - FOOTER_HEIGHT,
+            self.width() - BUBBLE_PADDING * 2,
+            FOOTER_HEIGHT,
+        )
+
+    # -------------------------------------------------------------------------
+    # Mouse – footer opens the mission list, anywhere else dismisses
+    # -------------------------------------------------------------------------
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if self._tasks and self._footer_rect().contains(event.position()):
+            self.open_panel_requested.emit()
+        self.hide_message()
+        self.dismissed.emit()
+        event.accept()
 
     # -------------------------------------------------------------------------
     # Painting – rounded rect + pointer
@@ -243,6 +316,11 @@ class SpeechBubble(QWidget):
         painter.setBrush(QBrush(BG_COLOR))
         painter.drawPath(pointer)
 
+        if self._tasks is not None:
+            self._paint_tasks(painter, w, h)
+            painter.end()
+            return
+
         # Message text
         font = QFont("Sans", 11)
         font.setBold(True)
@@ -261,10 +339,59 @@ class SpeechBubble(QWidget):
         )
         painter.end()
 
+    def _paint_tasks(self, painter: QPainter, w: float, h: float) -> None:
+        """Title, one row per pending task, then the footer link."""
+        x = BUBBLE_PADDING
+        y = BUBBLE_PADDING + STRIPE_HEIGHT
+        inner_w = w - BUBBLE_PADDING * 2
+
+        title_font = QFont("Sans", 11)
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        painter.setPen(QPen(TEXT_COLOR))
+        if not self._tasks:
+            title = "All clear! No missions \U0001F578"
+        else:
+            title = self._tasks_title or "Your missions, boss!"
+        painter.drawText(QRectF(x, y, inner_w, TITLE_HEIGHT),
+                         int(Qt.AlignmentFlag.AlignVCenter), title)
+        y += TITLE_HEIGHT
+
+        row_font = QFont("Sans", 10)
+        painter.setFont(row_font)
+        metrics = QFontMetrics(row_font)
+        for title, priority in self._tasks[:TASKS_MAX_ROWS]:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(PRIORITY_COLORS.get(priority, ACCENT_COLOR)))
+            painter.drawEllipse(QRectF(x + 2, y + ROW_HEIGHT / 2 - 4, 8, 8))
+            painter.setPen(QPen(TEXT_COLOR))
+            text = metrics.elidedText(title, Qt.TextElideMode.ElideRight, int(inner_w - 18))
+            painter.drawText(QRectF(x + 18, y, inner_w - 18, ROW_HEIGHT),
+                             int(Qt.AlignmentFlag.AlignVCenter), text)
+            y += ROW_HEIGHT
+
+        extra = len(self._tasks) - TASKS_MAX_ROWS
+        if extra > 0:
+            painter.setPen(QPen(MUTED_TEXT_COLOR))
+            painter.drawText(QRectF(x + 18, y, inner_w - 18, ROW_HEIGHT),
+                             int(Qt.AlignmentFlag.AlignVCenter), f"+{extra} more")
+
+        if self._tasks:
+            link_font = QFont("Sans", 10)
+            link_font.setBold(True)
+            painter.setFont(link_font)
+            painter.setPen(QPen(LINK_COLOR))
+            painter.drawText(self._footer_rect(),
+                             int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight),
+                             "Open mission list \u2192")
+
     # -------------------------------------------------------------------------
     # Animation event handlers
     # -------------------------------------------------------------------------
 
     def _on_exit_animation_finished(self) -> None:
+        # The fade animation is shared with the entrance – only hide on exit
+        if not self._animating_out:
+            return
         self.hide()
         self._animating_out = False

@@ -3,7 +3,7 @@
 Wires together all components:
 - Configuration
 - Task repository (SQLite persistence)
-- Physics engine (pendulum + spring)
+- Elastic web physics (owned by the companion window)
 - Transparent companion window
 - Task panel
 - Speech bubble
@@ -12,21 +12,21 @@ Wires together all components:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QTimer, QPoint, Qt
+from PySide6.QtCore import QLockFile, QTimer, QPoint, Qt
 from PySide6.QtGui import QIcon
 
 from hanging_reminder.config import AppConfig
 from hanging_reminder.tasks.repository import TaskRepository
-from hanging_reminder.physics import SimulationEngine, Spring, Pendulum
 from hanging_reminder.ui.companion_window import CompanionWindow
 from hanging_reminder.ui.task_panel import TaskPanel
 from hanging_reminder.ui.speech_bubble import SpeechBubble
 from hanging_reminder.ui.tray_icon import SpideyTrayIcon, ensure_icon_file
-from hanging_reminder.system.power_manager import PowerManager, show_power_reminder
+from hanging_reminder.system.power_manager import PowerManager
 from hanging_reminder.logging_config import logger
 
 
@@ -45,27 +45,10 @@ class HangingReminderApp:
         logger.info("Configuration loaded")
 
         # ------------------------------------------------------------------
-        # 2. Initialise backend: task repository, physics engines
+        # 2. Initialise backend: task repository
         # ------------------------------------------------------------------
         self.repository = TaskRepository(db_path=self.config.db_path)
-        self.simulation = SimulationEngine(dt=1.0 / 120)
-
-        self._spring = Spring(
-            rest_length=self.config.character_size * 0.6,
-            stiffness=self.config.spring_stiffness,
-            damping=self.config.damping,
-        )
-        self._pendulum = Pendulum(
-            length=max(self.config.character_size * 0.05, 2.0),
-            gravity=self.config.gravity,
-            damping=self.config.damping,
-            max_angle=self.config.max_angle,
-        )
-
-        self.simulation.add_entity(self._spring)
-        self.simulation.add_entity(self._pendulum)
-
-        logger.info("Backend initialized – repository + physics engines")
+        logger.info("Backend initialized – task repository")
 
         # ------------------------------------------------------------------
         # 3. Create the Qt application (must be before any UI)
@@ -75,11 +58,9 @@ class HangingReminderApp:
         else:
             self._qt_app = QApplication.instance()
 
-        # Ensure high-DPI scaling
-        if hasattr(Qt, "AA_EnableHighDpiScaling"):
-            self._qt_app.setAttribute(Qt.AA_EnableHighDpiScaling)
-        if hasattr(Qt, "AA_UseHighDpiPixmaps"):
-            self._qt_app.setAttribute(Qt.AA_UseHighDpiPixmaps)
+        # High-DPI scaling is always on in Qt 6.
+        # Closing panels/bubbles must not quit – Spidey lives in the tray too
+        self._qt_app.setQuitOnLastWindowClosed(False)
 
         # ------------------------------------------------------------------
         # 4. Create the companion window (frameless, transparent)
@@ -98,7 +79,7 @@ class HangingReminderApp:
         # ------------------------------------------------------------------
         # Initial positioning – will be updated on show
         self.task_panel.update_anchor(
-            self.window.mapToGlobal(QPoint(self.window.width() / 2, self.window.height() / 2))
+            self.window.head_global_pos()
         )
 
         # ------------------------------------------------------------------
@@ -111,19 +92,9 @@ class HangingReminderApp:
         # 8. Set up power-event integration (systemd-logind)
         # ------------------------------------------------------------------
         self.power_manager = PowerManager(config=self.config, parent=self.window)
-        # Connect power manager signals to app-level handlers
+        # Before sleep/shutdown Spidey lists pending tasks (inhibitor held at init)
         self.power_manager.reminder_requested.connect(self._on_power_reminder)
-        self.power_manager.cancel_requested.connect(self._on_power_cancel)
-        self.power_manager.continue_requested.connect(self._on_power_continue)
-        self.power_manager.timeout_requested.connect(self._on_power_timeout)
-
-        # Attempt to acquire a logind inhibitor early (will be re-acquired
-        # when a actual sleep/shutdown approach)
-        # We do this once at startup; the actual inhibitor is re-acquired
-        # when the logind signal fires.
-        # Note: this early attempt may fail if systemd/logind isn't available;
-        # that's OK – the signal handlers will re-attempt at the right time.
-        _ = self.power_manager.attempt_inhibit("sleep")  # best-effort
+        self._power_reminder_active: bool = False
 
         # ------------------------------------------------------------------
         # 9. Wire up UI event handlers
@@ -135,8 +106,11 @@ class HangingReminderApp:
         # Task panel – panel closed: ensure cleanup
         self.task_panel.panel_closed.connect(self._on_panel_closed)
 
-        # Companion window todo (📝) button – toggle the mission list
-        self.window.todo_toggle_requested.connect(self._toggle_task_panel)
+        # Tap on Spidey – show pending tasks in a speech bubble
+        self.window.tasks_requested.connect(self._show_tasks_bubble)
+        self.window.character_moved.connect(self.speech_bubble.update_anchor)
+        self.speech_bubble.open_panel_requested.connect(self._toggle_task_panel)
+        self.speech_bubble.dismissed.connect(self._on_bubble_dismissed)
 
         # --------------------------------------------------------------
         # 10a. Taskbar (system tray) icon + Spidey show/hide toggle
@@ -167,41 +141,15 @@ class HangingReminderApp:
         QTimer.singleShot(20_000, self._on_reminder_tick)
 
         # ------------------------------------------------------------------
-        # 10. Start the GUI timer – drives physics + repaint
-        # ------------------------------------------------------------------
-        # Qt's default timer resolution is ~15ms (~66 FPS).  We'll use
-        # 16ms for ~60 FPS target.
-        self._timer = QTimer(self._qt_app, interval=16, timeout=self._on_timer_tick)
-        self._timer.start()
-        logger.info("GUI timer started (16ms interval)")
-
-        # ------------------------------------------------------------------
-        # 11. Show the companion window
+        # 10. Show the companion window (it drives its own physics + repaint)
         # ------------------------------------------------------------------
         self.window.show()
-        # Ensure the window is on the correct monitor
-        self.window._reposition_to_monitor()
 
         logger.info("HangingReminderApp fully initialised – running")
 
     # ------------------------------------------------------------------
     # Event handlers
     # ------------------------------------------------------------------
-
-    def _on_timer_tick(self) -> None:
-        """Called 60 times per second – drive physics and repaint."""
-        # Fixed timestep physics update (already handled by simulation engine,
-        # but we also update the pendulum/spring state that the window uses)
-        dt = 1.0 / 120
-        self._pendulum.integrate(dt)
-        self._spring.integrate(dt)
-
-        # Smooth settling logic (already in companion window's _on_physics_tick)
-        # The window handles its own physics tick; we just ensure consistency.
-
-        # Force repaint – the companion window's paintEvent will render
-        # the character, web, and update rotations based on physics state.
-        self.window.update()
 
     def _on_task_toggled(self, task_id: int, completed: bool) -> None:
         """Handle task toggle – update character dialogue state."""
@@ -231,7 +179,7 @@ class HangingReminderApp:
     def _shutdown(self) -> None:
         """Quit the application cleanly from the tray menu."""
         logger.info("Shutdown requested via taskbar menu")
-        self.close()
+        self._qt_app.quit()  # main() runs close() once the loop exits
 
     def _on_panel_closed(self) -> None:
         """Handle task panel closing – cleanup."""
@@ -249,11 +197,22 @@ class HangingReminderApp:
             return
         self.task_panel.load_tasks()
         self.task_panel.update_anchor(
-            self.window.mapToGlobal(QPoint(int(self.window.width() / 2), int(self.window.height() / 2)))
+            self.window.head_global_pos()
         )
         self.task_panel.show()
         self.task_panel.raise_()
         logger.info("Task panel toggled open via todo button")
+
+    def _show_tasks_bubble(self, char_screen_pos: QPoint) -> None:
+        """Spidey was tapped – list the pending missions beside him."""
+        try:
+            pending = self.repository.get_pending()
+        except Exception:
+            logger.exception("Could not load pending tasks")
+            return
+        self.speech_bubble.update_anchor(char_screen_pos)
+        self.speech_bubble.show_tasks(pending, duration_ms=self.config.speech_bubble_duration * 2)
+        logger.info("Task bubble shown: %d pending", len(pending))
 
     def _on_reminder_tick(self) -> None:
         """Periodically remind the user about pending tasks via Spidey."""
@@ -268,9 +227,9 @@ class HangingReminderApp:
 
         noun = "mission" if pending == 1 else "missions"
         self.speech_bubble.update_anchor(
-            self.window.mapToGlobal(QPoint(int(self.window.width() / 2), int(self.window.height() / 2)))
+            self.window.head_global_pos()
         )
-        self.speech_bubble.show_message(f"\U0001F578 {pending} {noun} pending, boss! Tap the \U0001F4DD to plan.")
+        self.speech_bubble.show_message(f"\U0001F578 {pending} {noun} pending, boss! Tap me to see them.")
         QTimer.singleShot(self.config.speech_bubble_duration, self.speech_bubble.hide_message)
         logger.info("Reminder shown: %d pending %s", pending, noun)
 
@@ -279,33 +238,31 @@ class HangingReminderApp:
     # ------------------------------------------------------------------
 
     def _on_power_reminder(self, operation: str, timeout_ms: int) -> None:
-        """User needs to respond to a power-event reminder.
+        """Sleep/shutdown is coming – show pending tasks while it's held back."""
+        try:
+            pending = self.repository.get_pending()
+        except Exception:
+            logger.exception("Could not load pending tasks for the power reminder")
+            pending = []
+        if not pending:
+            self.power_manager.user_continued()  # nothing to remind about
+            return
 
-        Show a dialog with "Cancel and stay" / "Continue anyway" options.
-        The dialog should be modal but not block the GUI thread indefinitely.
-        """
-        logger.info(f"Power reminder for {operation} (timeout={timeout_ms}ms)")
-        # The application should display a QDialog here with two buttons.
-        # For now, we log and default to "continue" after the timeout.
-        # In a full implementation, show a QMessageBox or custom dialog.
+        verb = "sleep" if operation == "sleep" else "shut down"
+        logger.info("Power reminder for %s: %d pending (%d ms)", operation, len(pending), timeout_ms)
+        self._power_reminder_active = timeout_ms > 0
+        self.speech_bubble.update_anchor(self.window.head_global_pos())
+        self.speech_bubble.show_tasks(
+            pending,
+            duration_ms=timeout_ms or self.config.speech_bubble_duration,
+            title=f"Wait! Before you {verb}\u2026",
+        )
 
-    def _on_power_cancel(self, operation: str) -> None:
-        """User chose 'Cancel and stay' – prevent the power action."""
-        logger.info(f"User cancelled {operation}; application should attempt to delay sleep/shutdown")
-        # The application should use whatever mechanism it has to cancel
-        # the pending operation.  On GNOME/Ubuntu this might involve
-        # org.freedesktop.login1 inhibitor protocols or simply preventing
-        # the window from closing.  We cannot guarantee this works in all cases.
-
-    def _on_power_continue(self, operation: str) -> None:
-        """User chose 'Continue anyway' – allow the power action."""
-        logger.info(f"User continued past {operation}; releasing inhibitor")
-        # Release the inhibitor so the power action can proceed.
-
-    def _on_power_timeout(self, operation: str) -> None:
-        """User didn't respond in time – auto-continue."""
-        logger.warning(f"Power reminder timed out for {operation}; auto-continuing")
-        # Release the inhibitor and allow the operation to proceed.
+    def _on_bubble_dismissed(self) -> None:
+        """Tapping the bubble during a power reminder lets the system proceed."""
+        if self._power_reminder_active:
+            self._power_reminder_active = False
+            self.power_manager.user_continued()
 
     # ------------------------------------------------------------------
     # Application run loop
@@ -322,7 +279,7 @@ class HangingReminderApp:
     def close(self) -> None:
         """Clean up resources on application exit."""
         logger.info("Shutting down HangingReminderApp")
-        self._timer.stop()
+        self.tray_icon.shutdown()
         self.repository.close()
         self.power_manager.release_inhibitor()
         # The companion window will be deleted via WA_DeleteOnClose
@@ -334,6 +291,28 @@ class HangingReminderApp:
 
 def main() -> int:
     """Entry point for the Spider-Man Hanging Reminder application."""
+    # Single instance – autostart, the menu and a manual launch may overlap
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or str(Path.home() / ".local" / "share" / "spidey-sense")
+    lock = QLockFile(str(Path(runtime_dir) / "spidey-sense.lock"))
+    lock.setStaleLockTime(0)
+    if not lock.tryLock(100):
+        logger.info("Spidey is already running – not starting a second one")
+        return 0
+
+    # Native Wayland forbids clients from positioning themselves, staying on
+    # top and shaping their input region – run through XWayland instead.
+    if (
+        os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+        and "QT_QPA_PLATFORM" not in os.environ
+    ):
+        import ctypes.util
+        if ctypes.util.find_library("xcb-cursor"):
+            os.environ["QT_QPA_PLATFORM"] = "xcb"
+        else:
+            logger.warning(
+                "libxcb-cursor0 is missing – staying on native Wayland, where Spidey "
+                "can't stay on top or be dragged freely. Fix: sudo apt install libxcb-cursor0"
+            )
     app = HangingReminderApp()
     try:
         return app.run()
@@ -342,6 +321,7 @@ def main() -> int:
         return 0
     finally:
         app.close()
+        lock.unlock()
 
 
 if __name__ == "__main__":

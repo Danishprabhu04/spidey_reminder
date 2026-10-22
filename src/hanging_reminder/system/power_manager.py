@@ -1,34 +1,32 @@
 """Power-event integration with systemd-logind via D-Bus.
 
-Provides a reminder dialog before the computer enters sleep, suspend,
-or shutdown.  Uses logind's inhibitor mechanism to delay the operation
-for a bounded window (configurable default: 15 seconds), giving the
-user a chance to save work or dismiss the reminder.
+Shows a reminder before the computer goes to sleep or shuts down.  A
+logind *delay* inhibitor holds the operation back for a bounded window
+(``AppConfig.power_reminder_timeout``, capped by logind's
+``InhibitDelayMaxUSec``) so Spidey can list your pending tasks first.
 
 Key design points
 -----------------
-- Does NOT guarantee interception of every power path (physical button
-  holds, `systemctl poweroff`, etc. may bypass).
-- Acquires a logind Delay inhibitor, which works only when the calling
-  user session is managed by systemd (typical on Ubuntu 24.04 GNOME).
-- Falls back gracefully if the inhibitor cannot be acquired (e.g. Wayland
-  session without logind support, no systemd).
-- Uses a QTimer for the timeout so the GUI thread is never blocked.
-- Emits signals that the application controller can connect to for
-  "cancel" or "continue" actions.
-- Documents exactly which power actions are supported and tested.
+- A delay inhibitor can postpone sleep/shutdown but never cancel it, so
+  the reminder ends either on timeout or when the user dismisses it.
+- The inhibitor is a file descriptor: holding it open keeps the delay,
+  closing it lets the operation proceed.  It is re-acquired on resume.
+- D-Bus signals are delivered through the GLib main loop, which Qt's
+  event dispatcher already runs on Linux.
+- Falls back gracefully when logind is unavailable (no systemd,
+  sandbox) – the app keeps working without power reminders.
+- Does NOT intercept every power path (holding the power button,
+  ``systemctl poweroff -i`` etc. bypass inhibitors).
 """
 
 from __future__ import annotations
 
 import os
-import sys
 import logging
-from typing import Optional, Callable, Dict, Any
+from typing import Optional
 
 import dbus
 from PySide6.QtCore import QObject, Signal, QTimer
-from PySide6.QtDBus import QDBusConnection, QDBusInterface
 
 from hanging_reminder.config import AppConfig
 
@@ -46,19 +44,16 @@ logger = logging.getLogger("spidey_sense.power")
 _DBUS_SERVICE = "org.freedesktop.login1"
 _DBUS_PATH = "/org/freedesktop/login1"
 _DBUS_IFACE = "org.freedesktop.login1.Manager"
+_DBUS_PROPS_IFACE = "org.freedesktop.DBus.Properties"
 
-# Inhibitor flags (from the logind API)
-# Type: "sleep", "shutdown", "idle"
-# Mode: "block", "delay"
-INHIBIT_TYPE_SLEEP = "sleep"
-INHIBIT_TYPE_SHUTDOWN = "shutdown"
+INHIBIT_WHAT = "sleep:shutdown"
 
 # D-Bus signal names
 SIGNAL_PREPARE_FOR_SLEEP = "PrepareForSleep"
 SIGNAL_PREPARE_FOR_SHUTDOWN = "PrepareForShutdown"
 
-# Default timeout in seconds (configurable via AppConfig.power_reminder_timeout)
-DEFAULT_POWER_REMINDER_TIMEOUT = 15  # seconds
+# Leave logind some slack before it gives up on our inhibitor
+DELAY_SAFETY_MARGIN_MS = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -68,15 +63,11 @@ DEFAULT_POWER_REMINDER_TIMEOUT = 15  # seconds
 class PowerManager(QObject):
     """Manages power-event reminders via systemd-logind D-Bus."""
 
-    #: Emitted when a sleep/shutdown reminder is requested.
-    #: *args: (operation: str, timeout_secs: int)
+    #: Emitted when a sleep/shutdown reminder should be shown.
+    #: *args: (operation: str, timeout_ms: int) – 0 means it cannot be delayed
     reminder_requested = Signal(str, int)
 
-    #: Emitted when the user chooses "Cancel and stay".
-    #: *args: (operation: str)
-    cancel_requested = Signal(str)
-
-    #: Emitted when the user chooses "Continue anyway".
+    #: Emitted when the user dismissed the reminder early.
     #: *args: (operation: str)
     continue_requested = Signal(str)
 
@@ -88,225 +79,148 @@ class PowerManager(QObject):
         super().__init__(parent)
         self._config = config or AppConfig()
         self._timeout_ms: int = self._config.power_reminder_timeout
-        self._inhibitor: Optional[dbus.ObjectPath] = None
-        self._inhibit_name: str = f"spiderman-reminder-{os.getpid()}"
+        self._inhibit_fd: Optional[int] = None
         self._current_operation: str = ""  # "sleep" or "shutdown"
-        self._timeout_timer: Optional[QTimer] = None
 
-        # D-Bus main loop integration
-        self._bus: Optional[dbus.SessionBus] = None
+        self._bus: Optional[dbus.SystemBus] = None
         self._logind: Optional[dbus.Interface] = None
 
-        # ------------------------------------------------------------------
-        # Initialise D-Bus connection
-        # ------------------------------------------------------------------
-        self._init_dbus()
+        # Timeout timer – releases the inhibitor so the operation proceeds
+        self._timeout_timer = QTimer(self)
+        self._timeout_timer.setSingleShot(True)
+        self._timeout_timer.timeout.connect(self._on_timeout)
 
-        # ------------------------------------------------------------------
-        # Timeout timer – fires after *timeout_ms* milliseconds
-        # ------------------------------------------------------------------
-        self._timeout_timer = QTimer(self, interval=0, timeout=self._on_timeout)
-        # We'll start/stop it as needed.
+        self._init_dbus()
+        if self._logind is not None:
+            self.attempt_inhibit()
 
     # ------------------------------------------------------------------
     # D-Bus initialisation
     # ------------------------------------------------------------------
 
     def _init_dbus(self) -> None:
-        """Connect to the system bus and obtain the logind interface."""
+        """Connect to the system bus and subscribe to logind's signals."""
         try:
-            # Try the system bus first (most common on Ubuntu 24.04)
+            from dbus.mainloop.glib import DBusGMainLoop
+            DBusGMainLoop(set_as_default=True)
+
             self._bus = dbus.SystemBus()
             logind_obj = self._bus.get_object(_DBUS_SERVICE, _DBUS_PATH)
             self._logind = dbus.Interface(logind_obj, _DBUS_IFACE)
 
-            # Register signal receivers for sleep/shutdown preparation
             self._bus.add_signal_receiver(
                 self._on_prepare_sleep,
-                dbus_member=SIGNAL_PREPARE_FOR_SLEEP,
-                sender=_DBUS_SERVICE,
+                signal_name=SIGNAL_PREPARE_FOR_SLEEP,
+                dbus_interface=_DBUS_IFACE,
+                bus_name=_DBUS_SERVICE,
             )
             self._bus.add_signal_receiver(
                 self._on_prepare_shutdown,
-                dbus_member=SIGNAL_PREPARE_FOR_SHUTDOWN,
-                sender=_DBUS_SERVICE,
+                signal_name=SIGNAL_PREPARE_FOR_SHUTDOWN,
+                dbus_interface=_DBUS_IFACE,
+                bus_name=_DBUS_SERVICE,
             )
 
-            logger.info("D-Bus connected to systemd logind")
+            # Never ask for a longer delay than logind will honour
+            max_usec = int(logind_obj.Get(
+                _DBUS_IFACE, "InhibitDelayMaxUSec", dbus_interface=_DBUS_PROPS_IFACE
+            ))
+            max_ms = max(0, max_usec // 1000 - DELAY_SAFETY_MARGIN_MS)
+            self._timeout_ms = min(self._timeout_ms, max_ms)
+
+            logger.info("D-Bus connected to systemd logind (reminder window %d ms)", self._timeout_ms)
         except Exception as exc:
-            # D-Bus not available (e.g. no systemd, Wayland without logind,
-            # or running in a sandbox).  We operate in degraded mode.
-            logger.warning(f"Could not connect to systemd logind via D-Bus: {exc}")
+            logger.warning("Could not connect to systemd logind via D-Bus: %s", exc)
             self._bus = None
             self._logind = None
 
     # ------------------------------------------------------------------
-    # Inhibitor acquisition
+    # Inhibitor
     # ------------------------------------------------------------------
 
-    def attempt_inhibit(self, operation: str) -> bool:
-        """Request a logind delay inhibitor for *operation*.
+    @property
+    def has_inhibitor(self) -> bool:
+        return self._inhibit_fd is not None
 
-        Parameters
-        ----------
-        operation : str
-            Either "sleep" or "shutdown".
+    def attempt_inhibit(self) -> bool:
+        """Take a logind delay inhibitor for sleep and shutdown.
 
-        Returns
-        -------
-        True if the inhibitor was acquired successfully, False otherwise.
+        Returns True if the inhibitor is held.
         """
-        self._current_operation = operation
+        if self._inhibit_fd is not None:
+            return True
         if self._logind is None:
-            logger.error("Cannot inhibit – logind interface not available")
-            self._fallback_no_inhibitor(operation)
             return False
-
         try:
-            # Request a delay inhibitor.
-            # The logind API:  InhibitIdle(inhibitor_name, description, type, mode)
-            #   type: "sleep" or "shutdown"
-            #   mode: "delay" (we only request delay, not block)
-            self._inhibitor = self._logind.InhibitIdle(
-                self._inhibit_name,
-                "Spider-Man Hanging Reminder",
-                operation,
+            fd = self._logind.Inhibit(
+                INHIBIT_WHAT,
+                "Spidey Sense",
+                "Show pending missions before sleep or shutdown",
                 "delay",
             )
-            logger.info(f"Acquired logind inhibitor for {operation}: {self._inhibit_name}")
+            self._inhibit_fd = fd.take()
+            logger.info("Acquired logind delay inhibitor for %s", INHIBIT_WHAT)
             return True
         except dbus.DBusException as exc:
-            logger.error(f"Failed to acquire logind inhibitor: {exc}")
-            self._inhibitor = None
-            self._fallback_no_inhibitor(operation)
+            logger.warning("Failed to acquire logind inhibitor: %s", exc)
+            self._inhibit_fd = None
             return False
 
-    # ------------------------------------------------------------------
-    # Inhibitor release
-    # ------------------------------------------------------------------
-
     def release_inhibitor(self) -> None:
-        """Release the logind inhibitor, if any."""
-        if self._inhibitor is not None:
-            try:
-                # The inhibitor is released when the object goes out of scope
-                # or we explicitly close the connection.  Here we just null it.
-                self._inhibitor = None
-                logger.info("Logind inhibitor released")
-            except Exception as exc:
-                logger.warning(f"Error releasing inhibitor: {exc}")
-        self._inhibitor = None
+        """Close the inhibitor fd so a pending sleep/shutdown proceeds."""
+        self._timeout_timer.stop()
+        if self._inhibit_fd is None:
+            return
+        try:
+            os.close(self._inhibit_fd)
+            logger.info("Logind inhibitor released")
+        except OSError as exc:
+            logger.warning("Error releasing inhibitor: %s", exc)
+        self._inhibit_fd = None
 
     # ------------------------------------------------------------------
     # D-Bus signal handlers
     # ------------------------------------------------------------------
 
-    def _on_prepare_sleep(self, message: int, lid: int) -> None:
-        """Called by logind when sleep is preparing.
+    def _on_prepare_sleep(self, starting: bool) -> None:
+        """logind: True right before sleep, False after resume."""
+        logger.info("PrepareForSleep(%s)", bool(starting))
+        if starting:
+            self._show_reminder("sleep")
+        else:
+            self.attempt_inhibit()  # ready for the next sleep
 
-        *message* is the logind PrepareForSleep message type.
-        *lid* is the login session ID.
-        """
-        logger.info(f"PrepareForSleep received (msg={message}, lid={lid})")
-        self._show_reminder("sleep")
-
-    def _on_prepare_shutdown(self, message: int, lid: int) -> None:
-        """Called by logind when shutdown is preparing."""
-        logger.info(f"PrepareForShutdown received (msg={message}, lid={lid})")
-        self._show_reminder("shutdown")
+    def _on_prepare_shutdown(self, starting: bool) -> None:
+        """logind: True right before shutdown/reboot."""
+        logger.info("PrepareForShutdown(%s)", bool(starting))
+        if starting:
+            self._show_reminder("shutdown")
 
     # ------------------------------------------------------------------
     # Reminder flow
-# ------------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     def _show_reminder(self, operation: str) -> None:
-        """Show the power-event reminder dialog.
-
-        This is a pure signal emission – the application controller/GUI
-        is responsible for displaying the actual dialog and returning
-        the user's choice.
-        """
+        """Ask the GUI to show the reminder while the inhibitor holds."""
         self._current_operation = operation
-        logger.info(f"Showing power reminder for {operation}")
-
-        # Start the timeout timer (will auto-fire after *timeout_ms*)
-        if self._timeout_timer is not None:
+        if self.has_inhibitor:
             self._timeout_timer.start(self._timeout_ms)
-            logger.debug(f"Started {self._timeout_ms}ms timeout timer")
-
-        # Emit the reminder request signal – the GUI will show a dialog
-        self.reminder_requested.emit(operation, self._timeout_ms)
+            self.reminder_requested.emit(operation, self._timeout_ms)
+        else:
+            self.reminder_requested.emit(operation, 0)
 
     def _on_timeout(self) -> None:
-        """Timeout callback – user didn't respond in time."""
-        logger.info(f"Power reminder timed out for {self._current_operation}")
-        self._timeout_timer.stop()
+        """The user didn't respond in time – let the operation proceed."""
+        logger.info("Power reminder timed out for %s", self._current_operation)
         self.timeout_requested.emit(self._current_operation)
-        # Release the inhibitor so the power action can proceed
         self.release_inhibitor()
-
-    def _fallback_no_inhibitor(self, operation: str) -> None:
-        """Called when we cannot acquire a logind inhibitor.
-
-        In this case we still emit the reminder request but without an
-        inhibitor – the dialog appears but cannot delay the power action.
-        """
-        logger.warning(f"No logind inhibitor for {operation} – showing reminder without delay")
-        self._current_operation = operation
-        if self._timeout_timer is not None:
-            self._timeout_timer.start(self._timeout_ms)
-        self.reminder_requested.emit(operation, 0)  # timeout=0 means no delay
 
     # ------------------------------------------------------------------
     # Public API – user choice handling
     # ------------------------------------------------------------------
 
-    def user_cancelled(self) -> None:
-        """Call when the user chose "Cancel and stay" in the reminder dialog."""
-        logger.info(f"User cancelled {self._current_operation}; requesting inhibitor retention")
-        self.cancel_requested.emit(self._current_operation)
-        # The inhibitor is already held; we just note the user choice.
-        # The application controller should prevent the sleep/shutdown
-        # through its own means (e.g. QGssettings, session actions).
-        # Note: cannot guarantee cancellation of all power paths.
-
     def user_continued(self) -> None:
-        """Call when the user chose "Continue anyway" in the reminder dialog."""
-        logger.info(f"User continued past {self._current_operation}")
+        """The user dismissed the reminder – let the operation proceed now."""
+        logger.info("User continued past %s", self._current_operation)
         self.continue_requested.emit(self._current_operation)
-        # Release the inhibitor promptly so the power action proceeds
         self.release_inhibitor()
-
-
-# ---------------------------------------------------------------------------
-# Convenience helper – high-level wrapper for the application controller
-# ---------------------------------------------------------------------------
-
-def show_power_reminder(
-    config: AppConfig,
-    parent_window,
-    operation: str,
-) -> bool:
-    """High-level wrapper that sets up the PowerManager and returns.
-
-    The caller (application controller) should:
-      1. Connect the manager's signals to GUI dialog slots.
-      2. Show a dialog with "Cancel and stay" / "Continue anyway" buttons.
-      3. On "Cancel", call ``manager.user_cancelled()``.
-      4. On "Continue", call ``manager.user_continued()``.
-
-    Returns
-    -------
-    True if an inhibitor was acquired (delay possible), False otherwise.
-    """
-    from hanging_reminder.system.power_manager import PowerManager
-
-    manager = PowerManager(config=config, parent=parent_window)
-    acquired = manager.attempt_inhibit(operation)
-
-    if not acquired:
-        # Still show the reminder dialog even without an inhibitor,
-        # so the user gets feedback even if we can't delay the action.
-        manager._show_reminder(operation)
-
-    return acquired
