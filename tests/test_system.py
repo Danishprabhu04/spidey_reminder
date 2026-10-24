@@ -17,7 +17,8 @@ def test_autostart_enable_disable(tmp_path):
     text = entry.read_text()
     assert "Exec=/opt/spidey/bin/hanging-reminder" in text
     assert autostart.is_enabled(entry)
-    assert entry.stat().st_mode & 0o777 == 0o644
+    if sys.platform != "win32":  # Windows has no Unix permission bits
+        assert entry.stat().st_mode & 0o777 == 0o644
     autostart.disable(entry)
     assert not autostart.is_enabled(entry)
 
