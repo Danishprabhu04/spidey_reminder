@@ -13,7 +13,7 @@ window.HUB = {
       id: "spidey-sense",
       name: "Spidey Sense",
       status: "live", // "live" | "beta" | "soon"
-      version: "1.0.0", // keep in sync with src/hanging_reminder/__init__.py (CI checks it)
+      version: "1.0.1", // keep in sync with src/hanging_reminder/__init__.py (CI checks it)
       category: "Productivity · Desktop companion",
       tagline: "Your friendly neighbourhood to-do list.",
       description:
