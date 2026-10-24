@@ -102,7 +102,13 @@ jobs:
 
       - name: Installer (macOS)
         if: runner.os == 'macOS'
-        run: packaging/macos/build_dmg.sh
+        run: |
+          ls -la dist
+          bash -x packaging/macos/build_dmg.sh > dmg.log 2>&1 || {
+            tail -30 dmg.log | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
+          tail -3 dmg.log
 
       - uses: actions/upload-artifact@v4
         with:
