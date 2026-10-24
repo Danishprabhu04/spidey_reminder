@@ -93,6 +93,8 @@ python3 -m hanging_reminder.app   # or: hanging-reminder / spidey-sense
 
 A plain HTML/CSS/JS site – no build step – so it deploys anywhere (GitHub Pages, Netlify, Vercel, Cloudflare Pages: just point it at the `hub/` folder).
 
+**GitHub Pages (built in):** `.github/workflows/hub.yml` publishes `hub/` on every change. Turn it on once in the repo's *Settings → Pages → Source: GitHub Actions*, then re-run the *publish-hub* workflow (Actions tab). The hub appears at https://danishprabhu04.github.io/spidey_reminder/
+
 ```
 hub/index.html                 hub home page: hero, app cards, spotlight, about
 hub/assets/catalog.js          ← the app list: edit this to add an app or change links/versions
