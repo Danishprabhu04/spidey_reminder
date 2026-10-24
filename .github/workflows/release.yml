@@ -10,6 +10,7 @@ name: build-and-release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -31,9 +32,9 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -57,7 +58,15 @@ jobs:
           grep -q "version: \"$version\"" hub/assets/catalog.js || { echo "hub/assets/catalog.js still shows another version"; exit 1; }
 
       - name: Tests
-        run: python -m pytest -q tests
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q -rfE --tb=short tests 2>&1 | tee pytest.log || {
+            # Surface failures as annotations (readable without signing in)
+            grep -E "^(FAILED|ERROR) " pytest.log | head -20 | while read -r line; do echo "::error::$line"; done
+            grep -E "^E  " pytest.log | head -30 | while read -r line; do echo "::error::$line"; done
+            exit 1
+          }
 
       - name: Build app (PyInstaller)
         run: |

@@ -61,5 +61,9 @@ class TestAppConfig:
     def test_config_has_required_paths(self):
         """Config has config_path and db_path set."""
         config = AppConfig.load()
-        assert "config" in config.config_path.lower()
-        assert "share" in config.db_path.lower() or "local" in config.db_path.lower()
+        from pathlib import Path
+
+        from hanging_reminder import paths
+
+        assert Path(config.config_path) == paths.config_dir() / "config.json"
+        assert Path(config.db_path) == paths.data_dir() / "tasks.db"
