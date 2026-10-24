@@ -160,7 +160,8 @@ def _build_logger() -> Logger:
     logger.addHandler(console_handler)  # type: ignore[attr-call]
 
     # File handler – structured JSON
-    log_path = str(Path.home() / ".local" / "share" / "spidey-sense" / "log.txt")
+    from hanging_reminder import paths
+    log_path = str(paths.log_path())
     file_handler = RotatingFileHandler(log_path, max_bytes=500_000, backup_count=2)
     file_formatter = Formatter("%(message)s")  # we already emit JSON
     file_handler.setFormatter(file_formatter)  # type: ignore[attr-call]

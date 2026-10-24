@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spidey Sense — your friendly desktop to-do companion</title>
+<meta name="description" content="A tiny Spidey hangs from the top of your screen on an elastic web, keeps your to-do list, and reminds you at the right moment. Free for Windows, Linux and macOS.">
+<meta property="og:title" content="Spidey Sense">
+<meta property="og:description" content="A friendly desktop companion that hangs on your screen and keeps your missions.">
+<meta property="og:image" content="assets/spidey.png">
+<meta name="theme-color" content="#0f1117">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="nav">
+  <a class="logo" href="#top" aria-label="Spidey Sense home"><img src="assets/favicon.png" alt="" width="30" height="30"><span>Spidey <b>Sense</b></span></a>
+  <nav aria-label="Main">
+    <a href="../../" class="back">← All apps</a>
+    <a href="#features">Features</a>
+    <a href="#dashboard">Dashboard</a>
+    <a href="#install">Install</a>
+    <a href="#faq">FAQ</a>
+  </nav>
+  <a class="btn small primary" href="#install" data-download="auto">Download</a>
+</header>
+
+<main id="top">
+  <!-- Hero: Spidey hangs on a real spring-physics web you can drag -->
+  <section class="hero">
+    <canvas id="web" aria-label="Spidey hanging on an elastic web. Drag him and let go." role="img"></canvas>
+    <div class="hero-copy">
+      <p class="eyebrow">Free desktop companion · Windows · Linux · macOS</p>
+      <h1>Your friendly neighbourhood <span class="accent">to-do list.</span></h1>
+      <p class="lead">A tiny Spidey hangs from the top of your screen on an elastic web. Tap him to see your missions, fling him around when you're bored, and he'll drop down to remind you when something's due.</p>
+      <div class="cta">
+        <a class="btn primary big" id="dl-primary" href="#install">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V4a1 1 0 0 1 1-1Zm-7 15a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Z"/></svg>
+          <span id="dl-label">Download Spidey</span>
+        </a>
+        <div class="cta-meta">
+          <span id="dl-note">Free · no account · works offline</span>
+          <span class="others">Also for <span id="dl-others"><a href="#install">every desktop</a></span></span>
+        </div>
+      </div>
+      <p class="drag-hint" aria-hidden="true"><span>←</span> psst… grab Spidey and fling him</p>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section" id="features">
+    <div class="section-head">
+      <p class="eyebrow">What he does</p>
+      <h2>Small spider. Sixteen superpowers.</h2>
+    </div>
+    <div class="feature-groups">
+      <article class="group">
+        <h3><span class="g-icon">🎭</span> Personality</h3>
+        <ul>
+          <li><b>Elastic web physics</b> — drag him anywhere, let go and he springs back, spins and wobbles.</li>
+          <li><b>Moods &amp; expressions</b> — happy, proud, worried about overdue work, sleepy at night, dizzy after a fling.</li>
+          <li><b>Eyes follow your cursor</b> — and he flinches if you sneak up on him.</li>
+          <li><b>Celebrations</b> — backflips and web-confetti every time you finish something.</li>
+        </ul>
+      </article>
+      <article class="group">
+        <h3><span class="g-icon">📝</span> Missions</h3>
+        <ul>
+          <li><b>Type like a human</b> — “call mom tomorrow 5pm !high” sets the date, time and priority for you.</li>
+          <li><b>Quick add anywhere</b> — double-tap Spidey or press a global shortcut.</li>
+          <li><b>Focus timer</b> — Pomodoro sessions with a countdown ring on his chest.</li>
+          <li><b>Streaks &amp; stats</b> — daily streak, week chart and focus minutes.</li>
+        </ul>
+      </article>
+      <article class="group">
+        <h3><span class="g-icon">⏰</span> Smart reminders</h3>
+        <ul>
+          <li><b>Due-time alerts</b> — he drops down the screen with a desktop notification.</li>
+          <li><b>Knows when you're away</b> — waits while you're idle, locked or in a fullscreen game.</li>
+          <li><b>Morning &amp; end-of-day brief</b> — what's on today, and what you got done.</li>
+          <li><b>Snooze</b> — 10 minutes, an hour or tomorrow morning.</li>
+        </ul>
+      </article>
+      <article class="group">
+        <h3><span class="g-icon">🖥️</span> Your desktop</h3>
+        <ul>
+          <li><b>Web dashboard</b> — manage everything from your browser, live.</li>
+          <li><b>Multi-monitor</b> — swing him onto any screen; he remembers where he lives.</li>
+          <li><b>Do not disturb</b> — hide him for an hour or until tomorrow.</li>
+          <li><b>Sounds &amp; settings</b> — thwips, boings and cheers, all tweakable.</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section steps-wrap">
+    <div class="section-head">
+      <p class="eyebrow">Up and running in a minute</p>
+      <h2>Three steps. No sign-up.</h2>
+    </div>
+    <ol class="steps">
+      <li><span class="num">1</span><h3>Download</h3><p>Grab the installer for your computer — one file.</p></li>
+      <li><span class="num">2</span><h3>Run it</h3><p>Next, Finish. No admin password, nothing else to install.</p></li>
+      <li><span class="num">3</span><h3>Meet Spidey</h3><p>He swings in at the top of your screen and starts with you every day.</p></li>
+    </ol>
+  </section>
+
+  <!-- Dashboard -->
+  <section class="section dash" id="dashboard">
+    <div class="dash-copy">
+      <p class="eyebrow">Web dashboard</p>
+      <h2>Your missions, big screen.</h2>
+      <p>Spidey runs a private dashboard right on your computer. Add, edit, snooze and complete missions, watch your streak grow and start a focus session — changes show up on Spidey instantly.</p>
+      <ul class="ticks">
+        <li>Lives at <code>127.0.0.1</code> — only your computer can open it</li>
+        <li>Your data never leaves your machine</li>
+        <li>Open it from Spidey's tray menu</li>
+      </ul>
+      <a class="btn ghost" id="dash-link" href="http://127.0.0.1:47823/" target="_blank" rel="noopener">Open my dashboard ↗</a>
+      <p class="fine">Works once Spidey is installed and running.</p>
+    </div>
+    <figure class="dash-shot">
+      <img src="assets/dashboard.webp" width="1100" height="700" loading="lazy" alt="The Spidey Sense web dashboard: a mission list with due dates and priorities, weekly stats with a streak counter and a bar chart, and a focus timer.">
+    </figure>
+  </section>
+
+  <!-- Install -->
+  <section class="section" id="install">
+    <div class="section-head">
+      <p class="eyebrow">Install</p>
+      <h2>Pick your computer.</h2>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Operating system">
+      <button role="tab" id="tab-windows" aria-controls="panel-windows" data-os="windows">Windows</button>
+      <button role="tab" id="tab-linux" aria-controls="panel-linux" data-os="linux">Linux</button>
+      <button role="tab" id="tab-mac" aria-controls="panel-mac" data-os="mac">macOS</button>
+    </div>
+
+    <div class="panel" role="tabpanel" id="panel-windows" aria-labelledby="tab-windows">
+      <div class="panel-main">
+        <a class="btn primary big" data-download="windows" href="#">Download for Windows</a>
+        <p class="fine" data-note="windows"></p>
+        <ol class="howto">
+          <li>Open <code>SpideySense-Setup.exe</code>.</li>
+          <li>If Windows says <em>“Windows protected your PC”</em>, click <b>More info → Run anyway</b> (the installer isn't code-signed yet).</li>
+          <li>Click <b>Install</b>, then <b>Finish</b>. Spidey appears at the top of your screen.</li>
+        </ol>
+      </div>
+      <div class="panel-side">
+        <h3>Prefer a command?</h3>
+        <p>Paste into PowerShell:</p>
+        <div class="cmd"><code id="cmd-windows">irm https://raw.githubusercontent.com/Danishprabhu04/spidey_reminder/main/hub/products/spidey-sense/install.ps1 | iex</code><button class="copy" data-copy="cmd-windows">Copy</button></div>
+        <p class="fine">Uninstall any time from <b>Settings → Apps → Spidey Sense</b>.</p>
+      </div>
+    </div>
+
+    <div class="panel" role="tabpanel" id="panel-linux" aria-labelledby="tab-linux" hidden>
+      <div class="panel-main">
+        <p>Paste into a terminal — installs for you only, no sudo:</p>
+        <div class="cmd big"><code id="cmd-linux">curl -fsSL https://raw.githubusercontent.com/Danishprabhu04/spidey_reminder/main/hub/products/spidey-sense/install.sh | bash</code><button class="copy" data-copy="cmd-linux">Copy</button></div>
+        <p class="fine">Adds Spidey to your app menu and starts him at login. Tested on Ubuntu 22.04 &amp; 24.04 (GNOME, Wayland and X11).</p>
+      </div>
+      <div class="panel-side">
+        <h3>Or the AppImage</h3>
+        <a class="btn ghost" data-download="linux" href="#">Download AppImage</a>
+        <p class="fine">Right-click → Properties → <em>Allow executing</em>, then double-click.</p>
+        <p class="fine">To uninstall, run the command above with <code>bash -s -- --uninstall</code> at the end.</p>
+      </div>
+    </div>
+
+    <div class="panel" role="tabpanel" id="panel-mac" aria-labelledby="tab-mac" hidden>
+      <div class="panel-main">
+        <a class="btn primary big" data-download="mac" href="#">Download for macOS</a>
+        <p class="fine" data-note="mac"></p>
+        <ol class="howto">
+          <li>Open the <code>.dmg</code> and drag <b>Spidey Sense</b> into Applications.</li>
+          <li>First launch: <b>right-click the app → Open</b> (it isn't notarized yet).</li>
+        </ol>
+      </div>
+      <div class="panel-side">
+        <h3>Prefer a command?</h3>
+        <div class="cmd"><code id="cmd-mac">curl -fsSL https://raw.githubusercontent.com/Danishprabhu04/spidey_reminder/main/hub/products/spidey-sense/install.sh | bash</code><button class="copy" data-copy="cmd-mac">Copy</button></div>
+        <p class="fine">macOS support is in beta — the global shortcut isn't available there yet.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section faq" id="faq">
+    <div class="section-head">
+      <p class="eyebrow">FAQ</p>
+      <h2>Questions, answered.</h2>
+    </div>
+    <details>
+      <summary>Is it free? Do I need an account?</summary>
+      <p>Free, and no account. Spidey keeps everything in a small database on your own computer.</p>
+    </details>
+    <details>
+      <summary>Why does Windows warn me about the installer?</summary>
+      <p>New apps without a paid code-signing certificate get a SmartScreen warning. Click <b>More info → Run anyway</b>. The installer only writes to your user folder and never asks for admin rights.</p>
+    </details>
+    <details>
+      <summary>Will he get in my way?</summary>
+      <p>Clicks pass straight through everywhere except Spidey himself. He waits while you're away or in a fullscreen app, and <b>Do not disturb</b> hides him completely. Left-click his tray icon to hide or show him.</p>
+    </details>
+    <details>
+      <summary>How do I add a mission quickly?</summary>
+      <p>Double-tap Spidey, or press <kbd>Win</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd> on Windows / <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> on Linux. Write naturally: “pay rent friday 9am !high”.</p>
+    </details>
+    <details>
+      <summary>How do I uninstall?</summary>
+      <p>Windows: <b>Settings → Apps → Spidey Sense → Uninstall</b>. Linux/macOS: run the install command with <code>--uninstall</code> (add <code>--purge</code> to delete your missions too).</p>
+    </details>
+  </section>
+</main>
+
+<footer class="footer">
+  <div>
+    <a class="logo" href="#top"><img src="assets/favicon.png" alt="" width="26" height="26"><span>Spidey <b>Sense</b></span></a>
+    <p>Designed &amp; built by <b>Danish Prabhu</b> — Python, Qt and a lot of spring physics. <a href="../../">More apps →</a></p>
+  </div>
+  <div class="footer-links">
+    <a id="gh-link" href="#" hidden>GitHub</a>
+    <a id="li-link" href="#" hidden>LinkedIn</a>
+    <span>v<span id="version">1.0.0</span></span>
+  </div>
+  <p class="disclaimer">A fan-made project. Not affiliated with or endorsed by Marvel or Sony.</p>
+</footer>
+
+<script src="../../assets/catalog.js"></script>
+<script src="config.js"></script>
+<script src="rope.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

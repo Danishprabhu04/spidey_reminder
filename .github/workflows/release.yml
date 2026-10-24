@@ -1,0 +1,130 @@
+# Builds the Windows, Linux and macOS installers, checks that each one boots
+# (--self-test), and on a version tag attaches them to a GitHub Release of
+# this repo.  The hub's download buttons point at
+#   https://github.com/Danishprabhu04/spidey_reminder/releases/latest/download/<file>
+#
+# Release:  bump __version__ in src/hanging_reminder/__init__.py AND the
+#           Spidey "version" in hub/assets/catalog.js, commit, then
+#           git tag v1.0.0 && git push origin v1.0.0
+name: build-and-release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.12"
+
+permissions:
+  contents: write  # create the GitHub Release
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-cursor0 libdbus-1-dev libglib2.0-dev \
+            libegl1 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libfuse2
+
+      - name: Install
+        run: python -m pip install --upgrade pip && pip install -e ".[dev,build]"
+
+      - name: Version matches tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(python -c "import hanging_reminder; print(hanging_reminder.__version__)")
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "__version__ $version != tag $GITHUB_REF_NAME"; exit 1; }
+          grep -q "version: \"$version\"" hub/assets/catalog.js || { echo "hub/assets/catalog.js still shows another version"; exit 1; }
+
+      - name: Tests
+        run: python -m pytest -q tests
+
+      - name: Build app (PyInstaller)
+        run: |
+          python packaging/make_icons.py
+          pyinstaller packaging/spidey.spec --noconfirm
+
+      - name: Self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\SpideySense\SpideySense.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "self-test failed ($($p.ExitCode))" }
+
+      - name: Self-test (Linux)
+        if: runner.os == 'Linux'
+        run: dist/SpideySense/SpideySense --self-test
+
+      - name: Self-test (macOS)
+        if: runner.os == 'macOS'
+        run: '"dist/Spidey Sense.app/Contents/MacOS/SpideySense" --self-test'
+
+      - name: Installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = python -c "import hanging_reminder; print(hanging_reminder.__version__)"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\iscc.exe" "/DAppVersion=$version" packaging\windows\spidey.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
+
+      - name: Installer (Linux)
+        if: runner.os == 'Linux'
+        run: packaging/linux/build_linux.sh
+
+      - name: Installer (macOS)
+        if: runner.os == 'macOS'
+        run: packaging/macos/build_dmg.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            dist/SpideySense-Setup.exe
+            dist/SpideySense-linux-x86_64.tar.gz
+            dist/SpideySense-x86_64.AppImage
+            dist/SpideySense-macOS.dmg
+
+  release:
+    name: publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish installers
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Spidey Sense ${{ github.ref_name }}
+          make_latest: "true"
+          body: |
+            Download Spidey for your computer:
+            - **Windows** – `SpideySense-Setup.exe`
+            - **Linux** – `SpideySense-x86_64.AppImage`, or run `curl -fsSL https://raw.githubusercontent.com/Danishprabhu04/spidey_reminder/main/hub/products/spidey-sense/install.sh | bash`
+            - **macOS** – `SpideySense-macOS.dmg` (first open: right-click → Open)
+          files: dist/*

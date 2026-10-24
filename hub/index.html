@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Danish Labs — small apps with big personality</title>
+<meta name="description" content="Free, playful desktop apps by Danish Prabhu for Windows, Linux and macOS. Download Spidey Sense, the to-do list that hangs on your screen.">
+<meta property="og:title" content="Danish Labs — app hub">
+<meta property="og:description" content="Free, playful desktop apps for Windows, Linux and macOS.">
+<meta property="og:image" content="assets/spidey.png">
+<meta name="theme-color" content="#0b0d14">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/hub.css">
+</head>
+<body>
+<div class="bg" aria-hidden="true"><span class="orb o1"></span><span class="orb o2"></span><span class="orb o3"></span><span class="grid"></span></div>
+
+<header class="nav">
+  <a class="brand" href="#top" aria-label="Home">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5a5a"/><stop offset="1" stop-color="#6e7bff"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#g)"/><path d="M9 22V10h5.2c3.6 0 5.8 2.3 5.8 6s-2.2 6-5.8 6H9Z" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><circle cx="23.5" cy="21.5" r="2.2" fill="#fff"/></svg>
+    </span>
+    <span class="brand-name" data-hub="brand">Danish Labs</span>
+  </a>
+  <nav aria-label="Main">
+    <a href="#apps">Apps</a>
+    <a href="#why">Why</a>
+    <a href="#install">Install</a>
+    <a href="#about">About</a>
+  </nav>
+  <a class="btn btn-sm btn-glass" id="nav-github" href="#" target="_blank" rel="noopener">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.9 1.3 1.9 1.3 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.5 18.3 4.8 18.3 4.8c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z"/></svg>
+    <span>GitHub</span>
+  </a>
+</header>
+
+<main id="top">
+  <!-- ======================= HERO ======================= -->
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="pill"><span class="dot"></span> App hub · free for my friends (and you)</p>
+      <h1>Small apps with <span class="grad">big personality.</span></h1>
+      <p class="lead">Playful little tools for your desktop — made with care, free to use, and your data never leaves your computer. Pick one, click download, and it's yours.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary btn-lg" id="hero-download" href="#apps">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V4a1 1 0 0 1 1-1Zm-7 15a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Z"/></svg>
+          <span id="hero-download-label">Get Spidey Sense</span>
+        </a>
+        <a class="btn btn-glass btn-lg" href="#apps">Browse apps</a>
+      </div>
+      <ul class="trust">
+        <li><b>Free</b> forever</li>
+        <li><b>No</b> account</li>
+        <li><b>Windows</b> · Linux · macOS</li>
+      </ul>
+    </div>
+
+    <!-- A little desktop with Spidey hanging from the top bar -->
+    <div class="device" aria-hidden="true">
+      <div class="screen">
+        <div class="topbar"><span>Activities</span><span class="clock">Fri 10:42</span><span class="tray"><img src="assets/favicon.png" alt=""><i></i><i></i></span></div>
+        <div class="window">
+          <div class="window-bar"><i></i><i></i><i></i><span>Spidey dashboard</span></div>
+          <img src="assets/dashboard.webp" alt="" width="1100" height="700">
+        </div>
+        <div class="hang">
+          <span class="thread"></span>
+          <img class="spidey" src="assets/spidey.png" alt="">
+        </div>
+        <div class="bubble">🕸 3 missions today, boss!</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= APPS ======================= -->
+  <section class="section" id="apps">
+    <div class="section-head">
+      <p class="eyebrow">The apps</p>
+      <h2>Pick one. Click download. Done.</h2>
+      <p class="sub">Every app installs for your user only — no admin password, nothing else to set up.</p>
+    </div>
+    <div class="apps" id="app-list">
+      <noscript><p>Turn on JavaScript to see the apps, or open <a href="products/spidey-sense/">Spidey Sense</a> directly.</p></noscript>
+    </div>
+  </section>
+
+  <!-- ======================= SPOTLIGHT ======================= -->
+  <section class="section spotlight" id="spotlight">
+    <div class="spot-media">
+      <div class="spot-card">
+        <img src="assets/spidey.png" alt="" class="spot-spidey" width="512" height="512">
+      </div>
+    </div>
+    <div class="spot-copy">
+      <p class="eyebrow">Spotlight · Spidey Sense</p>
+      <h2>A to-do list you'll actually want to look at.</h2>
+      <ul class="checks">
+        <li><b>Hangs on your screen</b> on a springy web — grab him, fling him, watch him bounce back.</li>
+        <li><b>Type like a human</b>: “call mom tomorrow 5pm !high” sets the date and priority.</li>
+        <li><b>Reminds you at the right time</b> — and waits while you're away or gaming.</li>
+        <li><b>Focus timer, streaks and a web dashboard</b> to keep you going.</li>
+      </ul>
+      <div class="hero-cta">
+        <a class="btn btn-primary" data-download="spidey-sense" href="products/spidey-sense/">Download Spidey Sense</a>
+        <a class="btn btn-glass" href="products/spidey-sense/">See all features →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= WHY ======================= -->
+  <section class="section" id="why">
+    <div class="section-head">
+      <p class="eyebrow">Why these apps</p>
+      <h2>Built like I'd want them built.</h2>
+    </div>
+    <div class="values">
+      <article class="value"><span class="v-icon">🎁</span><h3>Free</h3><p>No trials, no ads, no “pro” tier. Download and use everything.</p></article>
+      <article class="value"><span class="v-icon">🔒</span><h3>Private</h3><p>No accounts and no cloud. Your data stays in a file on your own computer.</p></article>
+      <article class="value"><span class="v-icon">💻</span><h3>Everywhere</h3><p>Windows, Linux and macOS — one website, the right installer for your machine.</p></article>
+      <article class="value"><span class="v-icon">✨</span><h3>Delightful</h3><p>Little details, smooth animation and a bit of humour. Tools should be fun.</p></article>
+    </div>
+  </section>
+
+  <!-- ======================= INSTALL ======================= -->
+  <section class="section" id="install">
+    <div class="section-head">
+      <p class="eyebrow">Installing</p>
+      <h2>Up and running in a minute.</h2>
+    </div>
+    <ol class="steps">
+      <li><span class="num">1</span><h3>Download</h3><p>Hit the download button on an app. The site picks the right file for your computer.</p></li>
+      <li><span class="num">2</span><h3>Open the file</h3><p>Windows may say <em>“Windows protected your PC”</em> — click <b>More info → Run anyway</b>. My apps aren't code-signed yet.</p></li>
+      <li><span class="num">3</span><h3>Enjoy</h3><p>Click Install, then Finish. To remove an app later: <b>Settings → Apps</b>.</p></li>
+    </ol>
+  </section>
+
+  <!-- ======================= ABOUT ======================= -->
+  <section class="section" id="about">
+    <div class="about">
+      <div class="avatar" aria-hidden="true">DP</div>
+      <div>
+        <p class="eyebrow">The maker</p>
+        <h2>Hi, I'm <span data-hub="owner">Danish</span>.</h2>
+        <p class="sub">I build small, playful apps for my friends and me — mostly in Python, with a lot of attention to how they feel. Try them, break them, and tell me what I should build next.</p>
+        <div class="hero-cta">
+          <a class="btn btn-glass" id="about-github" href="#" target="_blank" rel="noopener">Follow on GitHub</a>
+          <a class="btn btn-glass" id="about-linkedin" href="#" target="_blank" rel="noopener" hidden>LinkedIn</a>
+          <a class="btn btn-glass" id="about-email" href="#" hidden>Email me</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <span>© <span id="year">2026</span> <span data-hub="owner">Danish Prabhu</span> · <span data-hub="brand">Danish Labs</span></span>
+  <span class="muted">Spidey Sense is a fan-made project, not affiliated with Marvel or Sony.</span>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="assets/catalog.js"></script>
+<script src="assets/hub.js"></script>
+</body>
+</html>

@@ -1,10 +1,12 @@
-# Spider-Man Hanging Reminder
+# Spidey Sense
 
-A desktop companion for Ubuntu 24.04 LTS that helps you remember unfinished tasks while you work.
+A friendly desktop companion for **Windows, Linux and macOS**: a tiny Spidey hangs from the top of your screen on an elastic web, keeps your to-do list ("missions") and reminds you at the right moment.
+
+**App hub & downloads:** the [`hub/`](hub/) folder is a static website (your app hub, with Spidey's page at `hub/products/spidey-sense/`). Installers are attached to this repo's [Releases](https://github.com/Danishprabhu04/spidey_reminder/releases/latest).
 
 ## Overview
 
-Spider-Man hangs from a transparent web attached to your screen's top edge. He swings naturally with physics, reacts to your mouse, and shows you a task panel with your unfinished missions. He also reminds you of pending tasks before your computer goes to sleep or shuts down.
+Spidey hangs from a transparent web attached to your screen's top edge. He swings naturally with physics, reacts to your mouse, and shows you your unfinished missions when you tap him. A local web dashboard lets you manage everything from the browser, and he reminds you of pending tasks when they're due – and before your computer goes to sleep or shuts down (Linux).
 
 ## Features
 
@@ -16,82 +18,134 @@ Spider-Man hangs from a transparent web attached to your screen's top edge. He s
 - **Tap for missions**: A single tap pops a speech bubble listing your pending tasks, with a link to the full mission list
 - **Click-through**: Only Spidey and his web catch the mouse – the rest of the screen works as usual
 
+### Personality
+- **Moods**: His eyes show how things are going – happy when you're clear, worried about overdue tasks, sleepy at night or when you're away, dizzy after a hard spin, proud after a win
+- **Eyes follow your cursor**, and they widen in surprise when the pointer comes right up to him
+- **Celebrations**: Completing a task earns a backflip and web confetti; clearing everything throws a bigger party
+- **Wanders on his own**: Every 5–12 minutes he swings along the top bar, yo-yos on his web or looks around – then returns home
+
 ### Task Management
-- **Create tasks**: Type a task and press Enter
-- **Complete tasks**: Click checkboxes – saves to SQLite immediately
-- **Edit/delete tasks**: Manage your mission list
-- **Priority levels**: High / Normal / Low with color coding
-- **Due dates**: Optional deadlines with overdue detection
-- **Persistence**: All tasks saved to SQLite, restored on restart
-- **Clear completed**: One-click removal of finished tasks
+- **Quick add**: Double-tap Spidey, press **Super+Shift+M** anywhere, or use the tray menu – type naturally: `Call mom tomorrow 5pm !high`, `Pay rent fri`, `Backup in 2 hours`
+- **Due dates & priority**: Parsed from what you type (with a live preview), editable later – double-click a task to edit, right-click for Edit / Focus / Snooze / Delete
+- **Overdue glow**: Overdue tasks glow red, ones due within 2 hours turn amber
+- **Streaks & stats**: 📊 in the mission panel shows your streak, tasks done today/this week, focus minutes and a 7-day chart
+- **Persistence**: Everything is stored in SQLite and restored on restart
+
+### Smart Reminders
+- **Due-time alerts**: When a task is due Spidey drops down on his web, wiggles and shows it with **Done** / **Snooze** buttons, plus a desktop notification with the same actions
+- **Snooze**: 10 minutes, 1 hour or tomorrow 9:00 (right-click the alert bubble, or from the mission list)
+- **Idle-aware**: Reminders wait while you're away, the screen is locked or an (X11) app is fullscreen, then arrive together when you're back
+- **Morning & end-of-day briefs**: Today's missions when you start the day; a wrap-up at your end-of-day time
+- **Periodic nudge**: "N missions pending" every so often (paused during focus sessions)
+
+### Focus Timer
+- **Pomodoro**: Right-click a task → *Focus on this* (or tray → *Start focus session*); a countdown ring appears on Spidey's chest and his eyes look determined
+- **Breaks**: When the session ends he celebrates and starts your break, then calls you back; focus minutes count toward your stats
 
 ### Desktop Experience
-- **Frameless transparent window**: No visible rectangle around the character
-- **Always-on-top**: Stays above other windows (X11 with compositor support)
-- **High-DPI aware**: Looks sharp on Retina and ordinary displays
-- **Window positioning**: Anchored to the top-left corner, moves with screen edges
-- **Low resource usage**: Fixed timestep physics at 120 Hz, minimal CPU at idle
+- **Frameless transparent overlay**: No visible rectangle around the character
+- **Always-on-top** via XWayland on GNOME Wayland (needs `libxcb-cursor0`)
+- **Multi-monitor**: Drag him onto another screen and he hangs from that screen's top bar; he remembers which screen
+- **Do not disturb**: Tray → *Do not disturb* hides and silences him for 1 hour or until tomorrow
+- **Sound effects**: Optional thwip, boing, cheer and alert sounds (generated on first run)
+- **Settings window**: Tray → *Settings…* for size, web springiness, motion, reminders, focus lengths, sounds, start at login and the quick-add shortcut
 
 ### Power Event Reminders
-- **Before sleep/shutdown**: Shows a dialog listing unfinished tasks
-- **Cancel and stay**: Delays the power action (if the system permits)
-- **Continue anyway**: Allows the operation to proceed
-- **Timeout**: Automatically continues after 15 seconds if no response
+- **Before sleep/shutdown**: Spidey lists your pending tasks while holding the action back for up to 15 seconds (configurable)
+- **Tap to continue**: Tapping the bubble lets the system go ahead immediately; with no pending tasks there is no delay
 
-### Integration
-- **Ubuntu 24.04 GNOME**: Native look and feel
-- **D-Bus logind**: System sleep/shutdown integration
-- **Desktop autostart**: Launch at login via .desktop file
-- **User-level configuration**: No root required
+### Web Dashboard
+- **http://127.0.0.1:47823** while Spidey runs (tray → *Open web dashboard*, or `hanging-reminder --dashboard`)
+- Add (with the same natural-language parser), edit, snooze, complete + undo, delete; streak/week stats; focus timer – changes show up on Spidey instantly
+- Private by design: listens on 127.0.0.1 only, checks the `Host` header (no DNS rebinding) and requires a per-launch token that only the served page knows
+
+### Platforms
+| | Linux (GNOME) | Windows 10/11 | macOS (beta) |
+|---|---|---|---|
+| Start at login | XDG autostart | `HKCU\…\Run` | LaunchAgent |
+| Quick-add shortcut | GNOME custom shortcut (Super+Shift+M) | `RegisterHotKey` (Win+Alt+M) | – |
+| Away / fullscreen detection | Mutter idle + screen lock + X11 fullscreen | `GetLastInputInfo` + `SHQueryUserNotificationState` | idle time |
+| Notifications | freedesktop, with Done/Snooze buttons | tray balloon | tray balloon |
+| Before-sleep reminder | logind delay inhibitor | at sign-out/shutdown only | – |
+| Data | `~/.config/spidey-sense`, `~/.local/share/spidey-sense` | `%APPDATA%\SpideySense` | `~/Library/Application Support/SpideySense` |
+
+No admin/root rights are needed anywhere.
 
 ## Installation
 
-### Using the installation script
+### For users (friends)
+Send them the hub – each app's download button picks the right installer:
+
+- **Windows:** `SpideySense-Setup.exe` (per-user, no admin) – or `irm https://raw.githubusercontent.com/Danishprabhu04/spidey_reminder/main/hub/products/spidey-sense/install.ps1 | iex`
+- **Linux:** `curl -fsSL https://raw.githubusercontent.com/Danishprabhu04/spidey_reminder/main/hub/products/spidey-sense/install.sh | bash` (installs to `~/.local/opt/spidey-sense`, adds a menu entry + autostart; append `-s -- --uninstall` to `bash` to remove it) – or the AppImage
+- **macOS:** `SpideySense-macOS.dmg` (unsigned: right-click → Open the first time)
+
+### For development
 
 ```bash
-# Download or cd to the project directory
-cd spidey-sense
-chmod +x install.sh
-./install.sh
+./install.sh                      # Ubuntu: system libs, pip install -e ., autostart, hotkey
+# or by hand:
+python3 -m pip install -e ".[dev]"
+python3 -m hanging_reminder.app   # or: hanging-reminder / spidey-sense
 ```
 
-### Manual installation
+## The app hub (`hub/`)
+
+A plain HTML/CSS/JS site – no build step – so it deploys anywhere (GitHub Pages, Netlify, Vercel, Cloudflare Pages: just point it at the `hub/` folder).
+
+```
+hub/index.html                 hub home page: hero, app cards, spotlight, about
+hub/assets/catalog.js          ← the app list: edit this to add an app or change links/versions
+hub/assets/hub.css, hub.js     hub styles + card rendering and OS-aware download buttons
+hub/products/spidey-sense/     Spidey's own page (+ install.sh / install.ps1)
+```
+
+To add another app: add an entry to `products` in `catalog.js` (copy the Spidey one) and, if you like, a page under `hub/products/<id>/`.
+Preview locally: `cd hub && python3 -m http.server` → http://localhost:8000
+
+## Releasing installers
+
+`.github/workflows/release.yml` runs the tests on Windows/Linux/macOS, builds with PyInstaller, boots every build with `--self-test`, packages them (Inno Setup `.exe`, `.tar.gz` + AppImage, `.dmg`) and – on a version tag – attaches them to a GitHub Release of this repo. No secrets needed.
 
 ```bash
-# 1. Install dependencies
-python3 -m pip install --break-system-packages PySide6 dbus-python pytest pytest-qt
-
-# 2. Create data directories
-mkdir -p ~/.local/share/spidey-sense
-mkdir -p ~/.config/spidey-sense
-
-# 3. Install the package (optional, for console entry)
-python3 -m pip install --break-system-packages -e .
-
-# 4. Create the autostart entry
-cat > ~/.config/autostart/spidey-reminder.desktop << 'DESKTOP'
-[Desktop Entry]
-Type=Application
-Exec=hanging-reminder
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-Name=Spider-Man Hanging Reminder
-Comment=A friendly desktop companion helping you remember tasks
-DESKTOP
-
-# 4. Launch the application
-hanging-reminder
+# bump __version__ in src/hanging_reminder/__init__.py and "version" in hub/assets/catalog.js, commit, then
+git tag v1.0.0 && git push origin v1.0.0
 ```
+Until the first release exists, the download buttons lead to a 404.
+
+Building locally (Linux):
+```bash
+python3 -m venv --system-site-packages build/venv
+build/venv/bin/python -s -m pip install PySide6-Essentials pyinstaller pillow
+build/venv/bin/python -s packaging/make_icons.py
+build/venv/bin/python -s -m PyInstaller packaging/spidey.spec --noconfirm
+dist/SpideySense/SpideySense --self-test
+packaging/linux/build_linux.sh            # --no-appimage to skip the AppImage
+```
+Set `SPIDEY_DOWNLOAD_BASE` to test the install scripts against local files.
 
 ## Running
 
 ```bash
 # From the project directory
-python3 -m hanging_reminder.app
+PYTHONPATH=src python3 -m hanging_reminder.app
 
 # Or using the console script (if installed)
-hanging-reminder
+hanging-reminder                 # start (or show the running Spidey)
+hanging-reminder --quick-add     # open the quick-add box
+hanging-reminder --dashboard     # open the web dashboard
+hanging-reminder --self-test     # boot offscreen for a few seconds and exit
+hanging-reminder --version
+```
+
+## Repository layout
+
+```
+src/hanging_reminder/   the app (Qt UI, physics, tasks, reminders, dashboard/)
+tests/                  pytest suite (isolated from your real profile by conftest.py)
+packaging/              PyInstaller spec, icon generator, Windows/Linux/macOS installer scripts
+hub/                    the app hub website (plain HTML/CSS/JS) incl. Spidey's page and install scripts
+.github/workflows/      build-and-release pipeline
 ```
 
 ## Project Structure

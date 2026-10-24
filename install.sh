@@ -34,26 +34,10 @@ python3 -m pip install --break-system-packages -e .
 # 4. Create the desktop autostart entry (starts Spidey at every login)
 # -------------------------------------------------------
 echo "Creating autostart entry..."
-# Absolute path – at login ~/.local/bin is not always on PATH yet
-APP_BIN="$(command -v hanging-reminder || echo "$HOME/.local/bin/hanging-reminder")"
-ICON="$HOME/.local/share/spidey-sense/spidey_icon.png"
-mkdir -p ~/.config/autostart
-DESKTOP_FILE=~/.config/autostart/spidey-reminder.desktop
-cat > "$DESKTOP_FILE" << DESKTOP
-[Desktop Entry]
-Type=Application
-Exec=$APP_BIN
-Icon=$ICON
-Hidden=false
-NoDisplay=false
-Terminal=false
-X-GNOME-Autostart-enabled=true
-X-GNOME-Autostart-Delay=3
-Name=Spider-Man Hanging Reminder
-Comment=A friendly desktop companion helping you remember tasks
-Categories=Utility;
-DESKTOP
-chmod 644 "$DESKTOP_FILE"
+python3 -m hanging_reminder.system.autostart enable
+
+# Global quick-add shortcut (GNOME custom keybinding)
+python3 -c "from hanging_reminder.system import autostart, gnome_keybinding as k; k.register('<Super><Shift>m', autostart.launcher_path() + ' --quick-add')" || true
 
 # -------------------------------------------------------
 # 5. Verify installation
@@ -63,6 +47,7 @@ echo "=== Installation Summary ==="
 echo "Application data: ~/.local/share/spidey-sense/"
 echo "Configuration:    ~/.config/spidey-sense/"
 echo "Autostart:        ~/.config/autostart/spidey-reminder.desktop"
+echo "Quick add:        Super+Shift+M (change it in Spidey's Settings)"
 echo ""
 echo "To launch the application:"
 echo "  hanging-reminder"

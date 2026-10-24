@@ -6,6 +6,8 @@ Features:
 - Text adapts to the current task state (no tasks, some tasks, many tasks).
 - Task-list mode (``show_tasks``): pending missions with priority dots and
   an "Open mission list" link.
+- Alert mode (``show_alert``): due tasks with Done / Snooze buttons; a
+  right-click offers more snooze choices.
 - Does not steal focus or block desktop interaction.
 - Always-on-top relative to the companion window, but with Qt.WindowType.Tool
   so it stays out of the taskbar.
@@ -59,6 +61,9 @@ class SpeechBubble(QWidget):
 
     open_panel_requested = Signal()
     dismissed = Signal()  # the user clicked the bubble
+    done_requested = Signal(list)          # task ids
+    snooze_requested = Signal(list, int)   # task ids, minutes (-1 = tomorrow 9:00)
+    action_clicked = Signal()              # the message's link (e.g. "Undo")
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -70,6 +75,8 @@ class SpeechBubble(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # macOS hides an inactive app's Tool windows; Spidey is never the active app
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
 
         # ---------------------------------------------------------
         # IMPORTANT: pose state must exist BEFORE the QPropertyAnimation
@@ -97,6 +104,9 @@ class SpeechBubble(QWidget):
         self._message: str = ""
         self._tasks: list | None = None  # (title, priority) rows in task-list mode
         self._tasks_title: str | None = None
+        self._task_ids: list[int] = []
+        self._alert: bool = False
+        self._action_label: str | None = None
         self._animating_in: bool = False
         self._animating_out: bool = False
         self._exit_connected: bool = False
@@ -135,9 +145,11 @@ class SpeechBubble(QWidget):
     # Public API – message & animation control
     # -------------------------------------------------------------------------
 
-    def show_message(self, message: str | None = None) -> None:
-        """Display a message in the bubble with an entrance animation."""
+    def show_message(self, message: str | None = None, action: str | None = None) -> None:
+        """Display a message (optionally with a link like "Undo") and animate in."""
         self._tasks = None
+        self._alert = False
+        self._action_label = action
         self._hide_timer.stop()
 
         if message is not None:
@@ -150,9 +162,18 @@ class SpeechBubble(QWidget):
     def show_tasks(self, tasks: list, duration_ms: int = 10000, title: str | None = None) -> None:
         """Show pending tasks as a list with an "Open mission list" link."""
         self._tasks = [(t.title, t.priority or "normal") for t in tasks]
+        self._task_ids = [t.id for t in tasks]
         self._tasks_title = title
+        self._alert = False
         self._animate_in()
         self._hide_timer.start(duration_ms)
+
+    def show_alert(self, tasks: list, title: str, duration_ms: int = 20000) -> None:
+        """Due-task alert with Done / Snooze buttons."""
+        self.show_tasks(tasks, duration_ms, title)
+        self._alert = True
+        self._reposition()
+        self.update()
 
     def _animate_in(self) -> None:
         self._animating_out = False
@@ -245,7 +266,8 @@ class SpeechBubble(QWidget):
 
     def _bubble_size(self) -> tuple[int, int]:
         if self._tasks is None:
-            return min(MAX_WIDTH, max(MIN_WIDTH, len(self._message) * 7 + 48)), 58 + BUBBLE_PADDING * 2
+            height = 58 + BUBBLE_PADDING * 2 + (FOOTER_HEIGHT if self._action_label else 0)
+            return min(MAX_WIDTH, max(MIN_WIDTH, len(self._message) * 7 + 48)), height
         rows = max(1, min(len(self._tasks), TASKS_MAX_ROWS))
         if len(self._tasks) > TASKS_MAX_ROWS:
             rows += 1  # "+N more"
@@ -262,16 +284,54 @@ class SpeechBubble(QWidget):
             FOOTER_HEIGHT,
         )
 
+    def _footer_buttons(self) -> list[tuple[QRectF, str, str]]:
+        """(rect, label, action) for the alert footer's two buttons."""
+        footer = self._footer_rect()
+        half = (footer.width() - 8) / 2
+        left = QRectF(footer.x(), footer.y() + 2, half, footer.height() - 4)
+        right = QRectF(footer.x() + half + 8, footer.y() + 2, half, footer.height() - 4)
+        if len(self._task_ids) == 1:
+            return [(left, "\u2713 Done", "done"), (right, "\U0001F4A4 10 min", "snooze")]
+        return [(left, "\U0001F4A4 Snooze all", "snooze"), (right, "Open list \u2192", "open")]
+
     # -------------------------------------------------------------------------
     # Mouse – footer opens the mission list, anywhere else dismisses
     # -------------------------------------------------------------------------
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
-        if self._tasks and self._footer_rect().contains(event.position()):
+        pos = event.position()
+        if self._alert and event.button() == Qt.MouseButton.RightButton:
+            self._snooze_menu(event.globalPosition().toPoint())
+            event.accept()
+            return
+        if self._alert:
+            for rect, _label, action in self._footer_buttons():
+                if rect.contains(pos):
+                    if action == "done":
+                        self.done_requested.emit(list(self._task_ids))
+                    elif action == "snooze":
+                        self.snooze_requested.emit(list(self._task_ids), 10)
+                    else:
+                        self.open_panel_requested.emit()
+                    break
+        elif self._tasks and self._footer_rect().contains(pos):
             self.open_panel_requested.emit()
+        elif self._tasks is None and self._action_label and self._footer_rect().contains(pos):
+            self.action_clicked.emit()
         self.hide_message()
         self.dismissed.emit()
         event.accept()
+
+    def _snooze_menu(self, global_pos: QPoint) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        ids = list(self._task_ids)
+        for label, minutes in (("Snooze 10 minutes", 10), ("Snooze 1 hour", 60),
+                               ("Snooze until tomorrow 9:00", -1)):
+            menu.addAction(label, lambda m=minutes: (self.snooze_requested.emit(ids, m),
+                                                     self.hide_message()))
+        menu.exec(global_pos)
 
     # -------------------------------------------------------------------------
     # Painting – rounded rect + pointer
@@ -326,17 +386,26 @@ class SpeechBubble(QWidget):
         font.setBold(True)
         painter.setFont(font)
         painter.setPen(QPen(TEXT_COLOR))
+        footer = FOOTER_HEIGHT if self._action_label else 0
         text_rect = QRectF(
             BUBBLE_PADDING,
             BUBBLE_PADDING + STRIPE_HEIGHT,
             w - BUBBLE_PADDING * 2,
-            h - BUBBLE_PADDING * 2 - STRIPE_HEIGHT,
+            h - BUBBLE_PADDING * 2 - STRIPE_HEIGHT - footer,
         )
         painter.drawText(
             text_rect,
             int(Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap),
             self._message,
         )
+        if self._action_label:
+            link_font = QFont("Sans", 10)
+            link_font.setBold(True)
+            painter.setFont(link_font)
+            painter.setPen(QPen(LINK_COLOR))
+            painter.drawText(self._footer_rect(),
+                             int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight),
+                             self._action_label)
         painter.end()
 
     def _paint_tasks(self, painter: QPainter, w: float, h: float) -> None:
@@ -376,7 +445,17 @@ class SpeechBubble(QWidget):
             painter.drawText(QRectF(x + 18, y, inner_w - 18, ROW_HEIGHT),
                              int(Qt.AlignmentFlag.AlignVCenter), f"+{extra} more")
 
-        if self._tasks:
+        if self._alert:
+            button_font = QFont("Sans", 10)
+            button_font.setBold(True)
+            painter.setFont(button_font)
+            for rect, label, action in self._footer_buttons():
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(ACCENT_COLOR if action == "done" else QColor(60, 66, 80)))
+                painter.drawRoundedRect(rect, 6, 6)
+                painter.setPen(QPen(TEXT_COLOR))
+                painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), label)
+        elif self._tasks:
             link_font = QFont("Sans", 10)
             link_font.setBold(True)
             painter.setFont(link_font)

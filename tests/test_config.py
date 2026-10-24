@@ -24,34 +24,16 @@ class TestAppConfig:
         assert config.character_size == 80
         assert config.idle_animation is True
 
-    def test_save_and_reload(self, tmpdir):
-        """Save config to disk and reload it."""
+    def test_save_and_reload(self, isolated_profile):
+        """Save config to disk and reload it (conftest points XDG at a tmp dir)."""
         config = AppConfig.load()
+        assert str(isolated_profile) in config.config_path
         config.spring_stiffness = 200.0
         config.damping = 0.3
-
-        # Save to the XDG default config path (which is under tmpdir)
-        # by temporarily setting XDG_CONFIG_HOME
-        original_cfg_home = os.environ.get("XDG_CONFIG_HOME", "")
-        os.environ["XDG_CONFIG_HOME"] = str(tmpdir)
-        try:
-            config.save()
-            # Reload – should pick up the saved values
-            config2 = AppConfig.load()
-            # Restore original env
-            if original_cfg_home:
-                os.environ["XDG_CONFIG_HOME"] = original_cfg_home
-            else:
-                del os.environ["XDG_CONFIG_HOME"]
-            assert config2.spring_stiffness == 200.0
-            assert config2.damping == 0.3
-        finally:
-            # Ensure env is cleaned up
-            if "XDG_CONFIG_HOME" in os.environ:
-                if original_cfg_home:
-                    os.environ["XDG_CONFIG_HOME"] = original_cfg_home
-                else:
-                    del os.environ["XDG_CONFIG_HOME"]
+        config.save()
+        config2 = AppConfig.load()
+        assert config2.spring_stiffness == 200.0
+        assert config2.damping == 0.3
 
     def test_validation_invalid_damping(self):
         """Invalid damping (>1 or <0) is corrected to default."""

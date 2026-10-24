@@ -33,7 +33,7 @@ import math
 GRAVITY = 1800.0           # px/s²
 WEB_STIFFNESS = 72.0       # pull per px of stretch (unit mass)
 WEB_SLACK_STIFFNESS = 0.12 # fraction of stiffness pushing back when compressed
-LINEAR_DAMPING = 0.9       # 1/s – velocity loss
+LINEAR_DAMPING = 1.6       # 1/s – velocity loss
 AIR_DRAG = 0.0004          # quadratic drag coefficient
 MAX_SPEED = 4000.0         # px/s – keeps the integration stable
 
@@ -47,17 +47,24 @@ GRAB_DAMPING = 85.0
 
 # Body rotation
 TILT_STIFFNESS = 60.0
-TILT_DAMPING = 4.0
-TILT_FLING_KICK = 0.004    # rad/s per px/s of sideways release speed
+TILT_DAMPING = 6.5
+TILT_FLING_KICK = 0.0015   # rad/s per px/s of sideways release speed
 
 # Depth wobble (front / back)
 DEPTH_STIFFNESS = 40.0
 DEPTH_DAMPING = 3.0
-DEPTH_FLING_KICK = 0.0004
-DEPTH_SWING_COUPLING = 0.00035
+DEPTH_FLING_KICK = 0.00025
+DEPTH_SWING_COUPLING = 0.0002
+
+# Release – a quick flick shouldn't hurl him across the screen
+RELEASE_SPEED_SCALE = 0.6
+MAX_RELEASE_SPEED = 1400.0  # px/s
 
 # Wall bounce
 RESTITUTION = 0.45
+
+# Rebound detection (for sound effects): stretch ratio at the turning point
+REBOUND_MIN_STRETCH = 1.5
 
 
 def _wrap(angle: float) -> float:
@@ -68,7 +75,9 @@ def _wrap(angle: float) -> float:
 class ElasticRope:
     """Unit-mass body hanging from an anchor by an elastic web."""
 
-    def __init__(self, anchor_x: float, anchor_y: float, rest_length: float) -> None:
+    def __init__(self, anchor_x: float, anchor_y: float, rest_length: float,
+                 stiffness: float = WEB_STIFFNESS) -> None:
+        self.stiffness: float = stiffness
         self.rest_length: float = rest_length
         self.current_length: float = rest_length  # reels toward rest_length
 
@@ -77,7 +86,7 @@ class ElasticRope:
         self.anchor_target_x: float = anchor_x
         self.anchor_target_y: float = anchor_y
 
-        sag = GRAVITY / WEB_STIFFNESS
+        sag = GRAVITY / stiffness
         self.x: float = anchor_x
         self.y: float = anchor_y + rest_length + sag
         self.vx: float = 0.0
@@ -94,6 +103,15 @@ class ElasticRope:
 
         # Optional (left, top, right, bottom) box the feet bounce inside
         self.bounds: tuple[float, float, float, float] | None = None
+
+        # Called with the stretch ratio when an over-stretched web snaps back
+        self.on_rebound = None
+        self._prev_dist: float = 0.0
+        self._lengthening: bool = False
+
+        # Remaining free rotation of a flip (radians); the tilt spring is
+        # suspended until it's used up
+        self._flip_remaining: float = 0.0
 
         self._grabbing: bool = False
         self._grab_x: float = 0.0
@@ -117,6 +135,12 @@ class ElasticRope:
         if not self._grabbing:
             return
         self._grabbing = False
+        self.vx *= RELEASE_SPEED_SCALE
+        self.vy *= RELEASE_SPEED_SCALE
+        speed = math.hypot(self.vx, self.vy)
+        if speed > MAX_RELEASE_SPEED:
+            self.vx *= MAX_RELEASE_SPEED / speed
+            self.vy *= MAX_RELEASE_SPEED / speed
         self.tilt_vel += self.vx * TILT_FLING_KICK
         self.vz += math.hypot(self.vx, self.vy) * DEPTH_FLING_KICK
 
@@ -127,6 +151,12 @@ class ElasticRope:
         self.current_length = max(
             self.rest_length, math.hypot(self.x - anchor_x, self.y - anchor_y)
         )
+
+    def flip(self, turns: float = 1.0, duration: float = 0.6) -> None:
+        """Spin the body through *turns* full rotations (celebration backflip)."""
+        angle = turns * 2.0 * math.pi
+        self._flip_remaining = angle
+        self.tilt_vel = math.copysign(angle / duration, self.tilt_vel or -1.0)
 
     def stretch_ratio(self) -> float:
         """Current web length relative to its rest length (1.0 = relaxed)."""
@@ -159,7 +189,7 @@ class ElasticRope:
         dist = math.hypot(dx, dy)
         if dist > 1e-6:
             stretch = dist - self.current_length
-            k = WEB_STIFFNESS if stretch > 0 else WEB_STIFFNESS * WEB_SLACK_STIFFNESS
+            k = self.stiffness if stretch > 0 else self.stiffness * WEB_SLACK_STIFFNESS
             pull = -k * stretch / dist
             ax_acc += pull * dx
             ay_acc += pull * dy
@@ -188,9 +218,16 @@ class ElasticRope:
         self.x += self.vx * dt
         self.y += self.vy * dt
         self._bounce_off_bounds()
+        self._detect_rebound()
 
         # Body rotation follows the web direction (unclamped)
-        if dist > 1e-6:
+        if self._flip_remaining > 0.0:
+            step = self.tilt_vel * dt
+            self.tilt += step
+            self._flip_remaining -= abs(step)
+            if self._flip_remaining <= 0.0:
+                self.tilt_vel *= 0.25  # land the flip softly
+        elif dist > 1e-6:
             target = math.atan2(self.x - self.ax, self.y - self.ay)
             error = _wrap(target - self.tilt)
             tilt_acc = TILT_STIFFNESS * error - TILT_DAMPING * self.tilt_vel
@@ -204,6 +241,22 @@ class ElasticRope:
         z_acc = -DEPTH_STIFFNESS * self.z - DEPTH_DAMPING * self.vz
         self.vz += z_acc * dt
         self.z += self.vz * dt
+
+    def _detect_rebound(self) -> None:
+        """Fire ``on_rebound`` at the turning point of a big stretch."""
+        dist = math.hypot(self.x - self.ax, self.y - self.ay)
+        lengthening = dist > self._prev_dist
+        if (
+            self._lengthening
+            and not lengthening
+            and not self._grabbing
+            and self.current_length > 0
+            and dist / self.current_length >= REBOUND_MIN_STRETCH
+            and self.on_rebound is not None
+        ):
+            self.on_rebound(dist / self.current_length)
+        self._lengthening = lengthening
+        self._prev_dist = dist
 
     # ------------------------------------------------------------------
     # Bounds

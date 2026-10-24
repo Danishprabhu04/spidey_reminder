@@ -17,6 +17,9 @@ Key design points
   sandbox) – the app keeps working without power reminders.
 - Does NOT intercept every power path (holding the power button,
   ``systemctl poweroff -i`` etc. bypass inhibitors).
+- Windows/macOS have no logind: there Spidey only gets a last-moment
+  shutdown/sign-out reminder through Qt's session manager
+  (``commitDataRequest``), which cannot hold the shutdown back.
 """
 
 from __future__ import annotations
@@ -25,8 +28,10 @@ import os
 import logging
 from typing import Optional
 
-import dbus
 from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtGui import QGuiApplication
+
+from hanging_reminder import paths
 
 from hanging_reminder.config import AppConfig
 
@@ -82,15 +87,19 @@ class PowerManager(QObject):
         self._inhibit_fd: Optional[int] = None
         self._current_operation: str = ""  # "sleep" or "shutdown"
 
-        self._bus: Optional[dbus.SystemBus] = None
-        self._logind: Optional[dbus.Interface] = None
+        self._bus = None      # dbus.SystemBus (Linux only)
+        self._logind = None   # dbus.Interface
+        self._max_delay_ms: int = 2**31 - 1
 
         # Timeout timer – releases the inhibitor so the operation proceeds
         self._timeout_timer = QTimer(self)
         self._timeout_timer.setSingleShot(True)
         self._timeout_timer.timeout.connect(self._on_timeout)
 
-        self._init_dbus()
+        if paths.IS_LINUX:
+            self._init_dbus()
+        else:
+            self._init_session_manager()
         if self._logind is not None:
             self.attempt_inhibit()
 
@@ -101,6 +110,7 @@ class PowerManager(QObject):
     def _init_dbus(self) -> None:
         """Connect to the system bus and subscribe to logind's signals."""
         try:
+            import dbus
             from dbus.mainloop.glib import DBusGMainLoop
             DBusGMainLoop(set_as_default=True)
 
@@ -125,14 +135,24 @@ class PowerManager(QObject):
             max_usec = int(logind_obj.Get(
                 _DBUS_IFACE, "InhibitDelayMaxUSec", dbus_interface=_DBUS_PROPS_IFACE
             ))
-            max_ms = max(0, max_usec // 1000 - DELAY_SAFETY_MARGIN_MS)
-            self._timeout_ms = min(self._timeout_ms, max_ms)
+            self._max_delay_ms = max(0, max_usec // 1000 - DELAY_SAFETY_MARGIN_MS)
+            self._timeout_ms = min(self._timeout_ms, self._max_delay_ms)
 
             logger.info("D-Bus connected to systemd logind (reminder window %d ms)", self._timeout_ms)
         except Exception as exc:
             logger.warning("Could not connect to systemd logind via D-Bus: %s", exc)
             self._bus = None
             self._logind = None
+
+    def _init_session_manager(self) -> None:
+        """Windows/macOS: remind at sign-out/shutdown (cannot be delayed)."""
+        app = QGuiApplication.instance()
+        if app is not None:
+            app.commitDataRequest.connect(lambda _manager: self._show_reminder("shutdown"))
+
+    def set_timeout_ms(self, timeout_ms: int) -> None:
+        """Change the reminder window (still capped by logind's maximum)."""
+        self._timeout_ms = min(int(timeout_ms), self._max_delay_ms)
 
     # ------------------------------------------------------------------
     # Inhibitor
@@ -161,7 +181,7 @@ class PowerManager(QObject):
             self._inhibit_fd = fd.take()
             logger.info("Acquired logind delay inhibitor for %s", INHIBIT_WHAT)
             return True
-        except dbus.DBusException as exc:
+        except Exception as exc:  # dbus.DBusException
             logger.warning("Failed to acquire logind inhibitor: %s", exc)
             self._inhibit_fd = None
             return False

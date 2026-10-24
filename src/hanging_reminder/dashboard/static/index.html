@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="spidey-token" content="__SPIDEY_TOKEN__">
+<title>Spidey Dashboard</title>
+<link rel="icon" href="/favicon.png">
+<link rel="stylesheet" href="/dashboard.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><img src="/favicon.png" alt="" width="34" height="34"><span>Spidey <b>Sense</b></span></div>
+  <div class="conn" id="conn"><span class="dot"></span><span id="conn-text">Connecting…</span></div>
+</header>
+
+<main class="grid">
+  <section class="card missions" aria-labelledby="missions-title">
+    <div class="card-head">
+      <h1 id="missions-title">Missions</h1>
+      <span class="count" id="count">0</span>
+    </div>
+    <form id="add-form" autocomplete="off">
+      <input id="add-input" maxlength="200" placeholder="Add a mission… e.g. call mom tomorrow 5pm !high" aria-label="New mission">
+      <button type="submit" class="btn primary">Add</button>
+    </form>
+    <div class="preview" id="preview" hidden></div>
+    <div class="undo" id="undo" hidden>Mission complete! <button class="link" id="undo-btn">Undo ↶</button></div>
+    <ul class="task-list" id="tasks" aria-live="polite"></ul>
+    <p class="empty" id="empty" hidden>🕸 No missions. Spidey is chilling.</p>
+  </section>
+
+  <aside class="side">
+    <section class="card" aria-labelledby="stats-title">
+      <div class="card-head"><h2 id="stats-title">This week</h2></div>
+      <div class="tiles">
+        <div class="tile"><span class="big" id="s-streak">0</span><span>🔥 day streak</span></div>
+        <div class="tile"><span class="big" id="s-today">0</span><span>done today</span></div>
+        <div class="tile"><span class="big" id="s-week">0</span><span>done this week</span></div>
+        <div class="tile"><span class="big" id="s-focus">0</span><span>focus min today</span></div>
+      </div>
+      <div class="bars" id="bars" role="img" aria-label="Missions done per day this week"></div>
+    </section>
+
+    <section class="card focus" aria-labelledby="focus-title">
+      <div class="card-head"><h2 id="focus-title">Focus timer</h2></div>
+      <div class="ring-wrap">
+        <svg viewBox="0 0 120 120" class="ring" aria-hidden="true">
+          <circle cx="60" cy="60" r="52" class="track"/>
+          <circle cx="60" cy="60" r="52" class="fill" id="ring-fill"/>
+        </svg>
+        <div class="ring-text"><span id="f-time">25:00</span><small id="f-state">Ready</small></div>
+      </div>
+      <p class="focus-task" id="f-task"></p>
+      <button class="btn primary wide" id="f-btn">Start focus</button>
+    </section>
+  </aside>
+</main>
+
+<dialog id="editor">
+  <form method="dialog" id="edit-form">
+    <h2>Edit mission</h2>
+    <label>Title<input id="e-title" maxlength="200" required></label>
+    <fieldset class="prio">
+      <legend>Priority</legend>
+      <label><input type="radio" name="prio" value="low"> Low</label>
+      <label><input type="radio" name="prio" value="normal"> Normal</label>
+      <label><input type="radio" name="prio" value="high"> High</label>
+    </fieldset>
+    <label>Due<input type="datetime-local" id="e-due"></label>
+    <label>Notes<textarea id="e-notes" rows="3" maxlength="2000"></textarea></label>
+    <div class="dialog-actions">
+      <button type="button" class="btn danger" id="e-delete">Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="e-cancel">Cancel</button>
+      <button type="submit" class="btn primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/dashboard.js"></script>
+</body>
+</html>

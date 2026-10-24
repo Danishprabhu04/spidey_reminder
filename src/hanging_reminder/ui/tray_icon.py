@@ -4,7 +4,8 @@ Provides:
 - A generated Spidey icon (rendered from the same painter code as the
   companion window) so the app shows up in the GNOME/Ubuntu top bar.
 - Left-click toggles Spidey visibility (hide/show on every desktop).
-- A context menu with a Show/Hide toggle, mission list and Quit.
+- A context menu with a Show/Hide toggle, quick add, mission list,
+  focus timer, web dashboard, do-not-disturb, settings and Quit.
 """
 
 from __future__ import annotations
@@ -15,9 +16,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+from hanging_reminder import APP_NAME, paths
 from hanging_reminder.logging_config import logger
 
-ICON_PATH = Path.home() / ".local" / "share" / "spidey-sense" / "spidey_icon.png"
+ICON_PATH = paths.icon_path()
 
 
 def build_spidey_icon_pixmap(size: int = 256) -> QPixmap:
@@ -55,12 +57,20 @@ class SpideyTrayIcon(QSystemTrayIcon):
         toggle_handler=None,
         todo_handler=None,
         quit_handler=None,
+        quick_add_handler=None,
+        settings_handler=None,
+        dnd_handler=None,
+        focus_handler=None,
+        dashboard_handler=None,
         parent=None,
     ) -> None:
         super().__init__(QIcon(icon_path), parent)
-        self.setToolTip("Spidey Reminder – click to hide / show Spidey")
+        self._base_tooltip = f"{APP_NAME} – click to hide / show Spidey"
+        self._status_lines: dict[str, str] = {}
+        self.setToolTip(self._base_tooltip)
 
         menu = QMenu()
+        self._menu = menu  # keep a reference – QSystemTrayIcon doesn't own it
 
         self._toggle_action = QAction("Hide Spidey", menu)
         self._toggle_action.setCheckable(True)
@@ -68,12 +78,40 @@ class SpideyTrayIcon(QSystemTrayIcon):
         self._toggle_action.toggled.connect(self._on_menu_toggle)
         menu.addAction(self._toggle_action)
 
+        if quick_add_handler is not None:
+            quick_action = QAction("Quick add…", menu)
+            quick_action.triggered.connect(quick_add_handler)
+            menu.addAction(quick_action)
+
         if todo_handler is not None:
             todo_action = QAction("Mission list", menu)
             todo_action.triggered.connect(todo_handler)
             menu.addAction(todo_action)
 
+        self._focus_action = None
+        if focus_handler is not None:
+            self._focus_action = QAction("Start focus session", menu)
+            self._focus_action.triggered.connect(focus_handler)
+            menu.addAction(self._focus_action)
+
+        if dashboard_handler is not None:
+            dashboard_action = QAction("Open web dashboard", menu)
+            dashboard_action.triggered.connect(dashboard_handler)
+            menu.addAction(dashboard_action)
+
+        if dnd_handler is not None:
+            dnd_menu = menu.addMenu("Do not disturb")
+            for label, minutes in (("For 1 hour", 60), ("Until tomorrow", -1), ("Off", 0)):
+                action = QAction(label, dnd_menu)
+                action.triggered.connect(lambda _=False, m=minutes: dnd_handler(m))
+                dnd_menu.addAction(action)
+
         menu.addSeparator()
+
+        if settings_handler is not None:
+            settings_action = QAction("Settings…", menu)
+            settings_action.triggered.connect(settings_handler)
+            menu.addAction(settings_action)
 
         quit_action = QAction("Quit", menu)
         if quit_handler is not None:
@@ -95,9 +133,10 @@ class SpideyTrayIcon(QSystemTrayIcon):
 
     def _on_menu_toggle(self, visible: bool) -> None:
         self._toggle_action.setText("Show Spidey" if not visible else "Hide Spidey")
-        self.setToolTip(
-            "Spidey Reminder – click to %s Spidey" % ("show" if not visible else "hide")
+        self._base_tooltip = (
+            f"{APP_NAME} – click to %s Spidey" % ("show" if not visible else "hide")
         )
+        self._refresh_tooltip()
         if self._toggle_cb is not None:
             self._toggle_cb(visible)
 
@@ -106,6 +145,21 @@ class SpideyTrayIcon(QSystemTrayIcon):
         if self._toggle_action.isChecked() != visible:
             self._toggle_action.setChecked(visible)
         self._toggle_action.setText("Show Spidey" if not visible else "Hide Spidey")
+
+    def set_status(self, key: str, text: str) -> None:
+        """Add/replace (or clear with "") a status line in the tooltip."""
+        if text:
+            self._status_lines[key] = text
+        else:
+            self._status_lines.pop(key, None)
+        self._refresh_tooltip()
+
+    def set_focus_label(self, text: str) -> None:
+        if self._focus_action is not None:
+            self._focus_action.setText(text)
+
+    def _refresh_tooltip(self) -> None:
+        self.setToolTip("\n".join([self._base_tooltip, *self._status_lines.values()]))
 
     def shutdown(self) -> None:
         """Cleanly remove the tray icon before the app exits."""

@@ -10,7 +10,10 @@ Spidey hangs UPSIDE DOWN from an elastic web (:class:`ElasticRope`):
 - Let go and he flings, bounces and swings freely (no angle limit), then
   springs back up his web to its one fixed anchor under his tray icon.
 - Drop him at the top bar to move that anchor (it is saved in the config).
-- Tap him (press + release without dragging) to see your pending tasks.
+- Tap him (press + release without dragging) to see your pending tasks;
+  double-tap him to quick-add one.
+- His eyes show his mood and follow the cursor; he celebrates completed
+  tasks, flinches when the pointer gets close and wanders now and then.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QCursor,
     QPainter,
     QPainterPath,
     QPen,
@@ -43,6 +47,11 @@ from PySide6.QtWidgets import QWidget, QApplication
 
 from hanging_reminder.physics import ElasticRope, SimulationEngine
 from hanging_reminder.config import AppConfig
+from hanging_reminder.ui.behaviors import IdleBehaviors
+from hanging_reminder.ui.eyes import Eyes, look_vector
+from hanging_reminder.ui.mood import MoodEngine
+from hanging_reminder.ui.particles import ParticleSystem
+from hanging_reminder.ui.screens import overlay_area, shift_between
 
 
 # ---------------------------------------------------------------------------
@@ -57,15 +66,28 @@ WEB_LENGTH_FACTOR = 2.2 # web strand length = character_size * WEB_LENGTH_FACTOR
 SPRITE_SUPERSAMPLE = 2  # sprite is pre-rendered at this × device pixel ratio
 
 # Idle animation – tiny periodic sideways force (px/s²)
-IDLE_SWAY_FORCE = 45.0
+IDLE_SWAY_FORCE = 22.0
 IDLE_SWAY_FREQ_1 = 1.05
 IDLE_SWAY_FREQ_2 = 2.30
 
 # Interaction
-DRAG_THRESHOLD_PX = 6       # movement before a press becomes a drag
-TAP_MAX_MS = 350            # longer presses without movement are ignored
+DRAG_THRESHOLD_PX = 12      # movement before a press becomes a drag
+TAP_MAX_MS = 500            # longer presses without movement are ignored
 EDGE_MARGIN = 12            # keep the feet this far from the work-area edges
 PIN_ZONE_PX = 70            # dropping the feet this close to the top re-pins the web
+
+# Personality
+FLINCH_DISTANCE_PX = 60     # cursor this close to his head startles him
+FLINCH_COOLDOWN_S = 30.0
+SWING_HOLD_S = (4.0, 6.0)   # how long a wander swing stays before going home
+YO_YO_STRETCH = 1.8
+YO_YO_HOLD_S = 2.2
+LOOK_AROUND_S = 2.4
+DOZE_S = 5.0
+ALERT_STRETCH = 2.2
+ALERT_HOLD_S = 2.5
+
+FOCUS_RING_CY = 0.285      # chest emblem centre (× sprite size)
 
 # Rendering
 MAX_DT = 0.05               # clamp frame time after stalls (seconds)
@@ -88,6 +110,9 @@ class CompanionWindow(QWidget):
 
     tasks_requested = Signal(QPoint)    # tap on Spidey – global head position
     character_moved = Signal(QPoint)    # every frame – global head position
+    web_released = Signal()             # let go after a drag (web shot)
+    web_rebounded = Signal(float)       # over-stretched web snapped back (ratio)
+    double_tapped = Signal(QPoint)      # double-tap on Spidey – global head position
 
     # ------------------------------------------------------------------
     # Construction
@@ -104,6 +129,8 @@ class CompanionWindow(QWidget):
 
         # Attributes for transparency
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        # macOS hides an inactive app's Tool windows; Spidey is never the active app
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -112,16 +139,17 @@ class CompanionWindow(QWidget):
         # Window flags – frameless + always-on-top, out of the taskbar
         self._setup_window_flags()
 
-        # Layout metrics
-        base = max(60, self.config.character_size)
-        self._char_px: int = int(base * CHAR_SCALE)
-        self._web_length: float = base * WEB_LENGTH_FACTOR
-
-        # Character sprite – upside-down chibi Spidey, drawn programmatically
-        self._character_pixmap: QPixmap = self._build_sprite()
+        # Layout metrics + sprite (upside-down chibi Spidey, drawn programmatically)
+        self._char_px: int = 0
+        self._web_length: float = 0.0
+        self._character_pixmap: QPixmap = QPixmap()
+        self._apply_metrics()
 
         # Physics – elastic web from the top bar
-        self._rope = ElasticRope(0.0, 0.0, self._web_length)
+        self._rope = ElasticRope(0.0, 0.0, self._web_length,
+                                 stiffness=float(self.config.web_stiffness))
+        self._rope.on_rebound = self.web_rebounded.emit
+        self._screen = None  # screen the overlay currently covers
         self._simulation = SimulationEngine(dt=1.0 / 120, max_substeps=8)
         self._simulation.add_entity(self._rope)
 
@@ -132,6 +160,26 @@ class CompanionWindow(QWidget):
         self._press_ms: int = 0
         self._grab_offset: QPointF = QPointF()
         self._press_clock: QElapsedTimer = QElapsedTimer()
+
+        # Tap vs. double-tap: the task bubble waits out the double-click interval
+        self._tap_timer: QTimer = QTimer(self)
+        self._tap_timer.setSingleShot(True)
+        self._tap_timer.timeout.connect(
+            lambda: self.tasks_requested.emit(self.head_global_pos())
+        )
+
+        # Personality: eyes, mood, particles, wandering
+        self._eyes = Eyes()
+        self._mood = MoodEngine()
+        self._particles = ParticleSystem()
+        self._behaviors = IdleBehaviors()
+        self._flinch_ready_at: float = 0.0
+        self._return_home_at: float = 0.0
+        self._restore_length_at: float = 0.0
+        self._look_around_until: float = 0.0
+        self._doze_until: float = 0.0
+        self._next_z_at: float = 0.0
+        self._focus_ring: tuple[float, str] | None = None  # (fraction left, kind)
 
         # Painting / mask bookkeeping
         self._last_dirty: QRect = QRect()
@@ -184,25 +232,35 @@ class CompanionWindow(QWidget):
     # Monitor positioning
     # ------------------------------------------------------------------
 
+    def _apply_metrics(self) -> None:
+        """Derive sprite/web sizes from ``config.character_size``."""
+        base = max(60, self.config.character_size)
+        self._char_px = int(base * CHAR_SCALE)
+        self._web_length = base * WEB_LENGTH_FACTOR
+        self._character_pixmap = self._build_sprite()
+
+    def apply_config(self) -> None:
+        """Apply edited settings (size, springiness) without restarting."""
+        self._apply_metrics()
+        self._rope.rest_length = self._web_length
+        self._rope.stiffness = float(self.config.web_stiffness)
+        self._reposition_to_monitor()
+        self._last_mask_key = ()
+        self.update()
+
+    def _target_screen(self):
+        """The remembered screen if it's connected, else the primary one."""
+        for screen in QApplication.screens():
+            if screen.name() == self.config.screen_name:
+                return screen
+        return QApplication.primaryScreen()
+
     def _reposition_to_monitor(self) -> None:
-        """Cover the primary screen's work area; hang Spidey near the top-right."""
-        screen = QApplication.primaryScreen()
+        """Cover the screen's work area; hang Spidey from his fixed anchor."""
+        screen = self._target_screen()
         if screen is None:
             return
-        area = screen.availableGeometry()
-        if area == screen.geometry():
-            # A borderless window exactly the monitor's size is treated as
-            # fullscreen by Mutter (hiding the top bar) – stay 1px short.
-            area.setHeight(area.height() - 1)
-        self.setGeometry(area)
-
-        w, h = float(area.width()), float(area.height())
-        self._rope.bounds = (
-            EDGE_MARGIN,
-            EDGE_MARGIN,
-            w - EDGE_MARGIN,
-            h - self._char_px - EDGE_MARGIN,
-        )
+        self._cover_screen(screen)
 
         home_x = self._home_anchor_x()
         self._rope.ax = self._rope.anchor_target_x = home_x
@@ -212,18 +270,61 @@ class CompanionWindow(QWidget):
         self._rope.y = self._rope.ay + self._web_length
         self._rope.vx = self._rope.vy = 0.0
 
+    def _cover_screen(self, screen) -> None:
+        """Resize the overlay to *screen*'s work area and set the physics bounds."""
+        self._screen = screen
+        area = QRect(*overlay_area(screen.availableGeometry().getRect(),
+                                   screen.geometry().getRect()))
+        self.setGeometry(area)
+        w, h = float(area.width()), float(area.height())
+        self._rope.bounds = (
+            EDGE_MARGIN,
+            EDGE_MARGIN,
+            w - EDGE_MARGIN,
+            h - self._char_px - EDGE_MARGIN,
+        )
         refresh = screen.refreshRate() or 60.0
         self._frame_timer.setInterval(max(6, int(1000.0 / min(refresh, 144.0))))
+
+    def _move_to_screen(self, screen) -> None:
+        """Carry Spidey to another monitor mid-drag, keeping global positions."""
+        old_origin = self.geometry().topLeft()
+        self._cover_screen(screen)
+        new_origin = self.geometry().topLeft()
+        dx, dy = shift_between((old_origin.x(), old_origin.y()), (new_origin.x(), new_origin.y()))
+        rope = self._rope
+        rope.x += dx
+        rope.y += dy
+        rope.ax += dx
+        rope.ay += dy
+        rope.anchor_target_x += dx
+        rope.anchor_target_y += dy
+        for particle in self._particles.particles:
+            particle.x += dx
+            particle.y += dy
+        self._press_pos += QPointF(dx, dy)
+        self.config.screen_name = screen.name()
+        self._last_mask_key = ()
+        from hanging_reminder.logging_config import logger
+        logger.info("Spidey moved to screen %s", screen.name())
+
+    def screens_changed(self) -> None:
+        """A monitor was plugged/unplugged – re-home on the right screen."""
+        if self._screen not in QApplication.screens() or self._target_screen() is not self._screen:
+            self._reposition_to_monitor()
 
     def _home_anchor_x(self) -> float:
         """Fixed web anchor under the tray icon, kept on screen."""
         w = float(self.width())
-        x = w - float(self.config.anchor_offset_right)
+        x = w - float(self.config.anchor_offset_for(self._screen_name()))
         return min(max(x, EDGE_MARGIN), w - EDGE_MARGIN)
+
+    def _screen_name(self) -> str:
+        return self._screen.name() if self._screen is not None else ""
 
     def _pin_anchor_here(self, x: float) -> None:
         """Move the fixed anchor to *x* and remember it across restarts."""
-        self.config.anchor_offset_right = int(round(self.width() - x))
+        self.config.set_anchor_offset(self._screen_name(), int(round(self.width() - x)))
         self.config.save()
 
     @staticmethod
@@ -240,7 +341,7 @@ class CompanionWindow(QWidget):
         ratio = max(1.0, self.devicePixelRatioF()) * SPRITE_SUPERSAMPLE
         pixmap = QPixmap(int(self._char_px * ratio), int(self._char_px * ratio))
         pixmap.fill(Qt.GlobalColor.transparent)
-        self._render_character(pixmap)
+        self._render_character(pixmap, draw_eyes=False)
         pixmap.setDevicePixelRatio(ratio)
         return pixmap
 
@@ -314,9 +415,30 @@ class CompanionWindow(QWidget):
         painter.setOpacity(1.0 + max(-0.15, min(0.0, depth)))  # dimmer when "behind"
         painter.drawPixmap(self._sprite_rect(), self._character_pixmap,
                            QRectF(self._character_pixmap.rect()))
+        self._eyes.paint(painter, float(self._char_px))
+        if self._focus_ring is not None:
+            self._paint_focus_ring(painter, *self._focus_ring)
         painter.restore()
 
+        if self._particles.alive:
+            self._particles.paint(painter)
+
         painter.end()
+
+    def _paint_focus_ring(self, painter: QPainter, fraction: float, kind: str) -> None:
+        """Countdown ring around the chest emblem (sprite-local coords)."""
+        s = float(self._char_px)
+        radius = 0.17 * s
+        rect = QRectF(-radius, FOCUS_RING_CY * s - radius, 2 * radius, 2 * radius)
+        width = max(2.0, 0.035 * s)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(255, 255, 255, 80), width))
+        painter.drawEllipse(rect)
+        colour = QColor(230, 130, 30) if kind == "focusing" else QColor(80, 170, 255)
+        pen = QPen(colour, width)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawArc(rect, 90 * 16, int(-360 * 16 * max(0.0, min(1.0, fraction))))
 
     def _draw_web(self, painter: QPainter) -> None:
         """Draw the elastic web strand; it thins out as it stretches."""
@@ -335,12 +457,13 @@ class CompanionWindow(QWidget):
     # Character sprite – chibi Spidey, upside down (feet top, head bottom)
     # ------------------------------------------------------------------
 
-    def _render_character(self, pixmap: QPixmap) -> None:
+    def _render_character(self, pixmap: QPixmap, draw_eyes: bool = True) -> None:
         """Render the upside-down chibi Spider-Man onto the given pixmap.
 
         Matches the reference art: red boots gripping the web at the top,
         small blue body, arms dangling beside a BIG red head with the
-        web-mask pattern and huge white eyes.
+        web-mask pattern and huge white eyes.  The live window skips the
+        eyes (``draw_eyes=False``) and animates them in ``ui/eyes.py``.
         """
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -422,7 +545,7 @@ class CompanionWindow(QWidget):
         painter.restore()
 
         # --- HUGE white eyes (the chibi signature) ---
-        for side in (-1, 1):
+        for side in ((-1, 1) if draw_eyes else ()):
             eye_cx = cx + side * head_r * 0.40
             eye_cy = head_cy - head_r * 0.02
             painter.save()
@@ -482,6 +605,11 @@ class CompanionWindow(QWidget):
             self._is_dragging = True
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
+        screen = QApplication.screenAt(event.globalPosition().toPoint())
+        if screen is not None and screen is not self._screen:
+            self._move_to_screen(screen)
+            pos = self.mapFromGlobal(event.globalPosition())
+
         target = pos + self._grab_offset
         self._rope.grab(target.x(), target.y())
         event.accept()
@@ -502,15 +630,23 @@ class CompanionWindow(QWidget):
                 self._pin_anchor_here(self._rope.x)
                 logger.info("Web anchor pinned %d px from the right edge",
                             self.config.anchor_offset_right)
-            # Spring back up the web to its fixed anchor
+            # Spring back up the web to its fixed anchor (on this screen)
             self._rope.shoot_web(self._home_anchor_x(), self._anchor_y())
+            self.web_released.emit()
+            if self.config.screen_name != self._screen_name():
+                self.config.screen_name = self._screen_name()
+            self.config.save()
             logger.info("Released Spidey with v=(%.0f, %.0f)", self._rope.vx, self._rope.vy)
         elif self._press_clock.elapsed() <= TAP_MAX_MS:
-            # A tap – a little startled hop, then show the to-do list
-            self._rope.vy -= 220.0
-            self._rope.vz += 0.6
-            logger.info("Spidey tapped – showing tasks")
-            self.tasks_requested.emit(self.head_global_pos())
+            # A tap – a tiny hop; a second tap means quick-add
+            self._rope.vy -= 90.0
+            self._rope.vz += 0.25
+            if self._tap_timer.isActive():
+                self._tap_timer.stop()
+                logger.info("Spidey double-tapped – quick add")
+                self.double_tapped.emit(self.head_global_pos())
+            else:
+                self._tap_timer.start(QApplication.doubleClickInterval())
         event.accept()
 
     # ------------------------------------------------------------------
@@ -535,7 +671,9 @@ class CompanionWindow(QWidget):
         else:
             self._rope.force_x = 0.0
 
-        self._simulation.update(min(elapsed, MAX_DT))
+        dt = min(elapsed, MAX_DT)
+        self._simulation.update(dt)
+        self._update_personality(time.monotonic(), dt)
 
         self._update_mask()
         dirty = self._dirty_rect()
@@ -547,14 +685,17 @@ class CompanionWindow(QWidget):
     def _dirty_rect(self) -> QRect:
         """Window area covered by the web and the sprite this frame."""
         sprite = self._sprite_transform().mapRect(self._sprite_rect())
-        web = self._web_path().boundingRect()
-        return sprite.united(web).adjusted(-4, -4, 4, 4).toAlignedRect()
+        area = sprite.united(self._web_path().boundingRect())
+        if self._particles.alive:
+            area = area.united(self._particles.bounding_rect())
+        return area.adjusted(-4, -4, 4, 4).toAlignedRect()
 
     def _update_mask(self) -> None:
         """Shape the window to Spidey + web so the rest is click-through."""
         key = (
             round(self._rope.x), round(self._rope.y), round(self._rope.ax),
             round(self._rope.ay), round(self._rope.tilt, 2), round(self._rope.z, 2),
+            self._particles.bounding_rect().toAlignedRect().getRect(),
         )
         if key == self._last_mask_key:
             return
@@ -574,8 +715,137 @@ class CompanionWindow(QWidget):
                             WEB_MASK_WIDTH, WEB_MASK_WIDTH)
         # Web tuft at the anchor
         region += QRect(int(self._rope.ax) - 6, int(self._rope.ay) - 2, 13, 11)
+        # Confetti / "z"s are painted outside the sprite while alive
+        if self._particles.alive:
+            region += self._particles.bounding_rect().toAlignedRect()
 
         self.setMask(region)
+
+    # ------------------------------------------------------------------
+    # Personality – mood, eyes, wandering, celebrations
+    # ------------------------------------------------------------------
+
+    def set_task_counts(self, pending: int, overdue: int) -> None:
+        self._mood.inputs.pending = pending
+        self._mood.inputs.overdue = overdue
+
+    def set_away(self, away: bool) -> None:
+        self._mood.inputs.away = away
+
+    def set_focusing(self, focusing: bool) -> None:
+        self._mood.inputs.focusing = focusing
+
+    def set_focus_ring(self, fraction: float | None, kind: str = "focusing") -> None:
+        """Show the countdown ring (fraction of time left) or hide it (None)."""
+        self._focus_ring = None if fraction is None else (fraction, kind)
+
+    @property
+    def mood(self) -> str:
+        return self._mood.evaluate(time.monotonic(), time.localtime().tm_hour)
+
+    def _head_point(self) -> QPointF:
+        return self._character_center()
+
+    def _update_personality(self, now: float, dt: float) -> None:
+        rope = self._rope
+        self._mood.notice_spin(now, dt, rope.tilt_vel)
+
+        look = (0.0, 0.0)
+        if now < self._look_around_until:
+            look = (math.sin(now * 2.6), 0.15)
+        elif self.config.eyes_follow_cursor:
+            cursor = QPointF(self.mapFromGlobal(QCursor.pos()))
+            inverse, ok = self._sprite_transform().inverted()
+            if ok:
+                look = look_vector(inverse.map(cursor), float(self._char_px))
+            self._maybe_flinch(now, cursor)
+
+        mood = self._mood.evaluate(now, time.localtime().tm_hour)
+        self._eyes.set_mood(mood, look)
+        self._eyes.update(dt)
+        self._particles.update(dt)
+        self._run_behaviors(now, mood)
+
+    def _maybe_flinch(self, now: float, cursor: QPointF) -> None:
+        if self._pressed or now < self._flinch_ready_at or self.config.reduced_motion:
+            return
+        head = self._head_point()
+        dx = head.x() - cursor.x()
+        if math.hypot(dx, head.y() - cursor.y()) > FLINCH_DISTANCE_PX:
+            return
+        # Only his eyes react – moving away would dodge the hand reaching for him
+        self._flinch_ready_at = now + FLINCH_COOLDOWN_S
+        self._mood.startle(now)
+
+    def _run_behaviors(self, now: float, mood: str) -> None:
+        rope = self._rope
+        if self._return_home_at and now >= self._return_home_at:
+            self._return_home_at = 0.0
+            if not self._pressed:
+                rope.shoot_web(self._home_anchor_x(), self._anchor_y())
+                self.web_released.emit()
+        if self._restore_length_at and now >= self._restore_length_at:
+            self._restore_length_at = 0.0
+            rope.rest_length = self._web_length
+        if now < self._doze_until and now >= self._next_z_at:
+            self._next_z_at = now + 0.9
+            head = self._head_point()
+            self._particles.float_z(head.x() + 18, head.y())
+
+        allowed = (
+            self.config.autonomous_moves
+            and not self.config.reduced_motion
+            and not self._pressed
+            and not self._mood.inputs.focusing
+            and not self._return_home_at
+            and not self._restore_length_at
+        )
+        action = self._behaviors.tick(now, allowed, sleepy=(mood == "sleepy"))
+        if action:
+            self.perform(action, now)
+
+    def perform(self, action: str, now: float | None = None) -> None:
+        """Run an idle move: swing / yo_yo / look_around / doze."""
+        import random
+        now = time.monotonic() if now is None else now
+        rope = self._rope
+        if action == "swing":
+            x = self._behaviors.swing_offset(self._home_anchor_x(), float(self.width()), EDGE_MARGIN)
+            rope.shoot_web(x, self._anchor_y())
+            self.web_released.emit()
+            self._return_home_at = now + random.uniform(*SWING_HOLD_S)
+        elif action == "yo_yo":
+            rope.rest_length = self._web_length * YO_YO_STRETCH
+            self._restore_length_at = now + YO_YO_HOLD_S
+        elif action == "look_around":
+            self._look_around_until = now + LOOK_AROUND_S
+        elif action == "doze":
+            self._doze_until = now + DOZE_S
+
+    def celebrate(self, big: bool = False) -> None:
+        """Backflip + web confetti (bigger party when everything is done)."""
+        now = time.monotonic()
+        rope = self._rope
+        rope.flip(turns=2.0 if big else 1.0, duration=0.9 if big else 0.55)
+        rope.vy -= 650.0
+        rope.vz += 0.5
+        self._mood.notice_completion(now)
+        head = self._head_point()
+        self._particles.burst(head.x(), head.y(), count=60 if big else 36)
+        if big:
+            for delay in (300, 650):
+                QTimer.singleShot(delay, lambda: self._particles.burst(
+                    self._head_point().x(), self._head_point().y(), count=45))
+
+    def startle(self) -> None:
+        self._mood.startle(time.monotonic())
+
+    def drop_alert(self) -> None:
+        """Due-time alert: drop down on a long web, wiggle, then reel back up."""
+        self._rope.rest_length = self._web_length * ALERT_STRETCH
+        self._rope.vx += 300.0
+        self._restore_length_at = time.monotonic() + ALERT_HOLD_S
+        self.startle()
 
     # ------------------------------------------------------------------
     # Show / hide

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Spidey Sense
+GenericName=Desktop companion & to-do list
+Comment=A friendly Spidey that hangs on your screen and keeps your missions
+Exec=SpideySense
+Icon=spidey-sense
+Terminal=false
+Categories=Utility;
+StartupNotify=false

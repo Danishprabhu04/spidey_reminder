@@ -219,3 +219,29 @@ class TestElasticRope:
         for _ in range(240):
             rope.integrate(1 / 120)
             assert 0 <= rope.x <= 200 and 0 <= rope.y <= 400
+
+    def test_rebound_callback_fires_once_per_big_stretch(self):
+        rope = ElasticRope(anchor_x=0, anchor_y=0, rest_length=180)
+        _run(rope, 10)
+        hits = []
+        rope.on_rebound = hits.append
+        rope.vy = 1500.0  # yank down hard
+        _run(rope, 0.6)
+        assert len(hits) == 1 and hits[0] >= 1.5
+
+    def test_stiffness_is_per_instance(self):
+        soft = ElasticRope(anchor_x=0, anchor_y=0, rest_length=180, stiffness=40)
+        hard = ElasticRope(anchor_x=0, anchor_y=0, rest_length=180, stiffness=200)
+        _run(soft, 20)
+        _run(hard, 20)
+        assert soft.y > hard.y  # softer web sags further
+
+    def test_flip_completes_full_turns_then_settles(self):
+        rope = ElasticRope(anchor_x=0, anchor_y=0, rest_length=180)
+        _run(rope, 10)
+        start = rope.tilt
+        rope.flip(turns=1.0, duration=0.5)
+        _run(rope, 0.6)
+        assert abs(rope.tilt - start) >= 2 * math.pi * 0.95
+        _run(rope, 20)
+        assert abs(math.atan2(math.sin(rope.tilt), math.cos(rope.tilt))) < 0.05
